@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'home_screen.dart'; // Required for navigation
+import 'home_screen.dart'; 
+import 'package:shared_preferences/shared_preferences.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -26,7 +27,6 @@ class _LoginScreenState extends State<LoginScreen> {
 
   bool _isLoading = false;
 
-  // IMPORTANT: Ensure this matches your current Wi-Fi IP
   final String serverUrl = "http://192.168.8.122:8000/login";
 
   Future<void> _handleLogin() async {
@@ -55,6 +55,11 @@ class _LoginScreenState extends State<LoginScreen> {
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
+
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool('isLoggedIn', true);
+        await prefs.setString('userName', data['name']);
+        await prefs.setInt('userId', data['user_id']);
 
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
