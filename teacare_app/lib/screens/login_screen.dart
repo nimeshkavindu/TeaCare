@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'home_screen.dart'; 
+import 'home_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -18,24 +18,24 @@ class _LoginScreenState extends State<LoginScreen> {
   static const Color kTextDark = Color(0xFF111813);
   static const Color kBorderColor = Color(0xFFDBE6DF);
 
-  // Controllers
-  final TextEditingController _phoneController = TextEditingController();
-  final TextEditingController _pin1 = TextEditingController();
-  final TextEditingController _pin2 = TextEditingController();
-  final TextEditingController _pin3 = TextEditingController();
-  final TextEditingController _pin4 = TextEditingController();
+  // Controllers (Updated for Generic Login)
+  final TextEditingController _identifierCtrl =
+      TextEditingController(); // Phone or Email
+  final TextEditingController _secretCtrl =
+      TextEditingController(); // PIN or Password
 
   bool _isLoading = false;
 
+  // Make sure this matches your PC's IP
   final String serverUrl = "http://192.168.8.122:8000/login";
 
   Future<void> _handleLogin() async {
-    // Combine the 4 boxes into one string
-    String pin = _pin1.text + _pin2.text + _pin3.text + _pin4.text;
+    String identifier = _identifierCtrl.text.trim();
+    String secret = _secretCtrl.text.trim();
 
-    if (_phoneController.text.isEmpty || pin.length < 4) {
+    if (identifier.isEmpty || secret.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Please enter phone and 4-digit PIN")),
+        const SnackBar(content: Text("Please enter your credentials")),
       );
       return;
     }
@@ -48,7 +48,10 @@ class _LoginScreenState extends State<LoginScreen> {
       final response = await http.post(
         Uri.parse(serverUrl),
         headers: {"Content-Type": "application/json"},
-        body: jsonEncode({"phone_number": _phoneController.text, "pin": pin}),
+        body: jsonEncode({
+          "identifier": identifier, // Matches Python LoginRequest
+          "secret": secret, // Matches Python LoginRequest
+        }),
       );
 
       if (!mounted) return;
@@ -56,10 +59,12 @@ class _LoginScreenState extends State<LoginScreen> {
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
 
+        // Save Session Data
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool('isLoggedIn', true);
         await prefs.setString('userName', data['name']);
         await prefs.setInt('userId', data['user_id']);
+        await prefs.setString('userRole', data['role']); // NEW: Save Role
 
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -68,18 +73,21 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
         );
 
+        // Navigate to Home
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
-            builder: (context) => HomeScreen(
-              userName: data['name'],
-              userId: data['user_id'], 
-            ),
+            builder: (context) =>
+                HomeScreen(userName: data['name'], userId: data['user_id']),
           ),
         );
       } else {
+        // Handle Server Error (401, 400, etc.)
+        final errorData = jsonDecode(response.body);
+        String errorMessage = errorData['detail'] ?? "Login Failed";
+
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Login Failed: Invalid Phone or PIN")),
+          SnackBar(content: Text(errorMessage), backgroundColor: Colors.red),
         );
       }
     } catch (e) {
@@ -104,7 +112,7 @@ class _LoginScreenState extends State<LoginScreen> {
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        iconTheme: const IconThemeData(color: kTextDark), 
+        iconTheme: const IconThemeData(color: kTextDark),
       ),
       body: SafeArea(
         child: SingleChildScrollView(
@@ -126,7 +134,7 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
               const SizedBox(height: 32),
 
-              // headline
+              // Headline
               const Text(
                 "Welcome to TeaCare",
                 style: TextStyle(
@@ -139,7 +147,7 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
               const SizedBox(height: 8),
               Text(
-                "Please enter your details to login",
+                "Log in with Phone or Email",
                 style: TextStyle(
                   fontSize: 16,
                   color: kTextDark.withOpacity(0.7),
@@ -148,11 +156,11 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
               const SizedBox(height: 40),
 
-              // phone number input
+              // --- INPUT 1: IDENTIFIER (Phone/Email) ---
               Align(
                 alignment: Alignment.centerLeft,
                 child: const Text(
-                  "Phone Number",
+                  "Phone Number or Email",
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w500,
@@ -162,25 +170,29 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
               const SizedBox(height: 8),
               TextField(
-                controller: _phoneController,
-                keyboardType: TextInputType.phone,
+                controller: _identifierCtrl,
+                keyboardType: TextInputType.emailAddress, // generic keyboard
                 style: const TextStyle(color: kTextDark),
                 decoration: InputDecoration(
-                  hintText: "Enter your phone number",
+                  hintText: "Enter phone or email",
+                  prefixIcon: const Icon(
+                    Icons.person_outline,
+                    color: Colors.grey,
+                  ),
                   hintStyle: TextStyle(color: kTextDark.withOpacity(0.4)),
                   filled: true,
                   fillColor: Colors.white,
                   contentPadding: const EdgeInsets.all(16),
                   border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.circular(12),
                     borderSide: const BorderSide(color: kBorderColor),
                   ),
                   enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.circular(12),
                     borderSide: const BorderSide(color: kBorderColor),
                   ),
                   focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.circular(12),
                     borderSide: const BorderSide(
                       color: kPrimaryGreen,
                       width: 2,
@@ -190,28 +202,55 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
               const SizedBox(height: 24),
 
-              // pin number input
-              const Text(
-                "4-Digit PIN",
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w500,
-                  color: kTextDark,
+              // --- INPUT 2: SECRET (PIN/Password) ---
+              Align(
+                alignment: Alignment.centerLeft,
+                child: const Text(
+                  "PIN or Password",
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w500,
+                    color: kTextDark,
+                  ),
                 ),
               ),
-              const SizedBox(height: 12),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  _buildPinBox(context, _pin1, first: true, last: false),
-                  _buildPinBox(context, _pin2, first: false, last: false),
-                  _buildPinBox(context, _pin3, first: false, last: false),
-                  _buildPinBox(context, _pin4, first: false, last: true),
-                ],
+              const SizedBox(height: 8),
+
+              // Standard Password Field (Replaces the 4-box layout)
+              TextField(
+                controller: _secretCtrl,
+                obscureText: true, // Hide text
+                style: const TextStyle(color: kTextDark),
+                decoration: InputDecoration(
+                  hintText: "Enter PIN or Password",
+                  prefixIcon: const Icon(
+                    Icons.lock_outline,
+                    color: Colors.grey,
+                  ),
+                  hintStyle: TextStyle(color: kTextDark.withOpacity(0.4)),
+                  filled: true,
+                  fillColor: Colors.white,
+                  contentPadding: const EdgeInsets.all(16),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: kBorderColor),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: kBorderColor),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(
+                      color: kPrimaryGreen,
+                      width: 2,
+                    ),
+                  ),
+                ),
               ),
               const SizedBox(height: 40),
 
-              // login button
+              // Login Button
               SizedBox(
                 width: double.infinity,
                 height: 56,
@@ -237,58 +276,6 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
               ),
             ],
-          ),
-        ),
-      ),
-    );
-  }
-
-// Pin boxes
-  Widget _buildPinBox(
-    BuildContext context,
-    TextEditingController controller, {
-    required bool first,
-    required bool last,
-  }) {
-    return SizedBox(
-      height: 64,
-      width: 64,
-      child: TextField(
-        controller: controller,
-        autofocus: first,
-
-        // hide text
-        obscureText: true,
-        obscuringCharacter: '●',
-
-        onChanged: (value) {
-          if (value.length == 1 && !last) {
-            FocusScope.of(context).nextFocus();
-          }
-          if (value.isEmpty && !first) {
-            FocusScope.of(context).previousFocus();
-          }
-        },
-        showCursor: false,
-        textAlign: TextAlign.center,
-        style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-        keyboardType: TextInputType.number,
-        maxLength: 1,
-        decoration: InputDecoration(
-          counterText: "",
-          filled: true,
-          fillColor: Colors.white,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: kBorderColor),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: kBorderColor),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: kPrimaryGreen, width: 2),
           ),
         ),
       ),

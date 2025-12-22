@@ -1,9 +1,10 @@
 from fastapi import FastAPI, HTTPException, Depends, UploadFile, File
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from sqlalchemy import create_engine, Column, Integer, String
+from sqlalchemy import create_engine, Column, Integer, String, or_
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
+from passlib.context import CryptContext
 import shutil
 import os
 import tensorflow as tf
@@ -13,7 +14,7 @@ import io
 from datetime import datetime
 from fastapi import Form 
 import pickle
-
+import uvicorn
 
 #DBConfig
 SQLALCHEMY_DATABASE_URL = "postgresql://postgres:admin123@localhost/teacare_db"
@@ -22,15 +23,24 @@ engine = create_engine(SQLALCHEMY_DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
+# --- SECURITY ---
+pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
 
+def verify_password(plain_password, hashed_password):
+    return pwd_context.verify(plain_password, hashed_password)
+
+def get_password_hash(password):
+    return pwd_context.hash(password)
+
+# --- MODELS ---
 class User(Base):
     __tablename__ = "users"
     user_id = Column(Integer, primary_key=True, index=True)
     full_name = Column(String)
-    phone_number = Column(String, unique=True)
-    pin_hash = Column(String)
-    role = Column(String, default="Farmer")
-
+    phone_number = Column(String, unique=True, nullable=True)
+    email = Column(String, unique=True, nullable=True)
+    password_hash = Column(String) 
+    role = Column(String) 
 
 class DiseaseReport(Base):
     __tablename__ = "disease_reports"
@@ -63,7 +73,73 @@ class ForumComment(Base):
 
 Base.metadata.create_all(bind=engine)
 
+# --- API REQUEST SCHEMAS ---
+class UserRegister(BaseModel):
+    full_name: str
+    contact_type: str  
+    contact_value: str 
+    secret: str        
+    role: str
+
+class LoginRequest(BaseModel):
+    identifier: str 
+    secret: str     
+
 app = FastAPI()
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+@app.post("/register")
+def register(user: UserRegister, db: Session = Depends(get_db)):
+    # 1. Check if user exists (Check both columns)
+    existing_user = db.query(User).filter(
+        or_(User.phone_number == user.contact_value, User.email == user.contact_value)
+    ).first()
+    
+    if existing_user:
+        raise HTTPException(status_code=400, detail="User already registered")
+
+    # 2. Prepare data based on contact type
+    new_phone = user.contact_value if user.contact_type == "phone" else None
+    new_email = user.contact_value if user.contact_type == "email" else None
+    
+    # 3. Hash the secret (PIN or Password)
+    hashed_secret = get_password_hash(user.secret)
+
+    # 4. Save
+    new_user = User(
+        full_name=user.full_name,
+        phone_number=new_phone,
+        email=new_email,
+        password_hash=hashed_secret,
+        role=user.role
+    )
+    db.add(new_user)
+    db.commit()
+    return {"message": "Registration successful"}
+
+@app.post("/login")
+def login(request: LoginRequest, db: Session = Depends(get_db)):
+    # 1. Find user by Email OR Phone
+    user = db.query(User).filter(
+        or_(User.phone_number == request.identifier, User.email == request.identifier)
+    ).first()
+
+    # 2. Verify
+    if not user or not verify_password(request.secret, user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    return {
+        "message": "Login successful",
+        "user_id": user.user_id,
+        "name": user.full_name,
+        "role": user.role
+    }
 
 # --- 1. LOAD THE MODEL & CLASSES ---
 print("Loading AI Model...")
@@ -130,25 +206,6 @@ async def predict_disease(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
-class LoginRequest(BaseModel):
-    phone_number: str
-    pin: str
-
-
-class RegisterRequest(BaseModel):
-    full_name: str
-    phone_number: str
-    pin: str
-
-
 # upload files
 os.makedirs("uploads", exist_ok=True)
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
@@ -158,34 +215,6 @@ app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 @app.get("/")
 def read_root():
     return {"message": "TeaCare Backend is Running!"}
-
-
-@app.post("/login")
-def login(request: LoginRequest, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.phone_number == request.phone_number).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    if user.pin_hash != request.pin:
-        raise HTTPException(status_code=401, detail="Incorrect PIN")
-    return {"message": "Login Successful", "name": user.full_name, "user_id": user.user_id}
-
-
-@app.post("/register")
-def register_farmer(request: RegisterRequest, db: Session = Depends(get_db)):
-    existing_user = db.query(User).filter(User.phone_number == request.phone_number).first()
-    if existing_user:
-        raise HTTPException(status_code=400, detail="Phone number already registered")
-
-    new_user = User(
-        full_name=request.full_name,
-        phone_number=request.phone_number,
-        pin_hash=request.pin,
-        role="Farmer"
-    )
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
-    return {"message": "Registration Successful", "user_id": new_user.user_id}
 
 
 @app.post("/predict")

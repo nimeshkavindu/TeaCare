@@ -7,7 +7,7 @@ import 'history_screen.dart';
 import 'weather_screen.dart';
 import 'community_screen.dart';
 import 'profile_screen.dart';
-import 'heat_map_screen.dart'; // <--- IMPORT NEW SCREEN
+import 'heat_map_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   final String userName;
