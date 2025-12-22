@@ -6,6 +6,8 @@ import 'diagnosis_screen.dart';
 import 'history_screen.dart';
 import 'weather_screen.dart';
 import 'community_screen.dart';
+import 'profile_screen.dart';
+import 'heat_map_screen.dart'; // <--- IMPORT NEW SCREEN
 
 class HomeScreen extends StatefulWidget {
   final String userName;
@@ -20,9 +22,11 @@ class _HomeScreenState extends State<HomeScreen> {
   final ImagePicker _picker = ImagePicker();
   bool _isUploading = false;
   List<dynamic> _history = [];
-
-  // Ensure this IP address is accessible from your device/emulator
+  
+  // Ensure this IP matches your setup
   final String serverUrl = "http://192.168.8.122:8000/predict";
+
+  int _selectedIndex = 0;
 
   @override
   void initState() {
@@ -30,37 +34,71 @@ class _HomeScreenState extends State<HomeScreen> {
     _fetchHistory();
   }
 
-  // Fetch history from backend
+  // --- NAVIGATION LOGIC ---
+  void _onItemTapped(int index) {
+    if (index == 1) {
+      _showScanOptions();
+    } else {
+      setState(() {
+        _selectedIndex = index;
+      });
+    }
+  }
+
+  // --- SCAN MODAL ---
+  void _showScanOptions() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (BuildContext bc) {
+        return SafeArea(
+          child: Wrap(
+            children: <Widget>[
+              ListTile(
+                leading: const Icon(Icons.camera_alt, color: Color(0xFF11D452)),
+                title: const Text('Take Photo'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _scanLeaf(ImageSource.camera);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.photo_library, color: Color(0xFF15803D)),
+                title: const Text('Choose from Gallery'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _scanLeaf(ImageSource.gallery);
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // --- FETCH HISTORY ---
   Future<void> _fetchHistory() async {
     final String baseUrl = serverUrl.replaceAll("/predict", "");
     final String historyUrl = "$baseUrl/history/${widget.userId}";
 
     try {
       final response = await http.get(Uri.parse(historyUrl));
-
       if (response.statusCode == 200) {
         if (mounted) {
           setState(() {
             _history = jsonDecode(response.body);
           });
         }
-      } else {
-        print("Server Error fetching history: ${response.statusCode}");
       }
     } catch (e) {
-      print("Connection Error fetching history: $e");
+      print("Error fetching history: $e");
     }
   }
 
-  // Show error snackbar
-  void _showError(String message) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), backgroundColor: Colors.red),
-    );
-  }
-
-  // Function to pick image and upload
+  // --- SCAN LOGIC ---
   Future<void> _scanLeaf(ImageSource source) async {
     try {
       final XFile? photo = await _picker.pickImage(source: source);
@@ -68,26 +106,17 @@ class _HomeScreenState extends State<HomeScreen> {
 
       setState(() => _isUploading = true);
 
-      // 1. Create Multipart Request
       var request = http.MultipartRequest('POST', Uri.parse(serverUrl));
-
-      // 2. Add the image file
       request.files.add(await http.MultipartFile.fromPath('file', photo.path));
-
-      // 3. Add User ID (So we can save history)
       request.fields['user_id'] = widget.userId.toString();
 
-      // 4. Send
       var streamedResponse = await request.send();
       var response = await http.Response.fromStream(streamedResponse);
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-
-        // Refresh history to show the new scan in "Recent Activity"
         _fetchHistory();
 
-        // 5. Navigate to Results Screen
         if (mounted) {
           Navigator.push(
             context,
@@ -95,7 +124,7 @@ class _HomeScreenState extends State<HomeScreen> {
               builder: (context) => DiagnosisScreen(
                 diseaseName: data['disease_name'],
                 confidence: data['confidence'],
-                imagePath: photo.path, // Pass local path to display
+                imagePath: photo.path,
                 treatment: data['treatment'],
                 symptoms: data['symptoms'] ?? [],
               ),
@@ -108,18 +137,31 @@ class _HomeScreenState extends State<HomeScreen> {
     } catch (e) {
       _showError("Connection Failed: $e");
     } finally {
-      if (mounted) {
-        setState(() => _isUploading = false);
-      }
+      if (mounted) setState(() => _isUploading = false);
     }
+  }
+
+  void _showError(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), backgroundColor: Colors.red),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    // --- UPDATED PAGE LIST (Map is now Index 3) ---
+    final List<Widget> pages = [
+      _buildHomeDashboard(),
+      const SizedBox(), 
+      CommunityScreen(userId: widget.userId, userName: widget.userName),
+      const HeatMapScreen(), // <--- NEW POSITION
+    ];
+
     return Scaffold(
       backgroundColor: const Color(0xFFF8F9FA),
 
-      // Header
+      // --- APP BAR ---
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 0,
@@ -146,340 +188,275 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         actions: [
           IconButton(
-            icon: const Icon(
-              Icons.notifications_outlined,
-              color: Color(0xFF6B7280),
-            ),
+            icon: const Icon(Icons.notifications_outlined, color: Color(0xFF6B7280)),
             onPressed: () {},
           ),
-          const Padding(
-            padding: EdgeInsets.only(right: 16),
-            child: CircleAvatar(
-              backgroundColor: Color(0xFFFFE0B2),
-              child: Icon(Icons.person, color: Colors.orange),
+          Padding(
+            padding: const EdgeInsets.only(right: 16),
+            child: GestureDetector(
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => ProfileScreen(userName: widget.userName),
+                  ),
+                );
+              },
+              child: const CircleAvatar(
+                backgroundColor: Color(0xFFFFE0B2),
+                child: Icon(Icons.person, color: Colors.orange),
+              ),
             ),
           ),
         ],
       ),
 
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Center(
-              child: Column(
-                children: [
-                  Text(
-                    "Welcome back, ${widget.userName}!",
-                    style: const TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.bold,
-                      color: Color(0xFF1F2937),
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  const Text(
-                    "Keep your tea plants healthy with smart monitoring",
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 14, color: Color(0xFF6B7280)),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 32),
+      body: pages[_selectedIndex],
 
-            Container(
+      // --- BOTTOM NAVIGATION (Updated) ---
+      bottomNavigationBar: BottomNavigationBar(
+        type: BottomNavigationBarType.fixed,
+        currentIndex: _selectedIndex,
+        onTap: _onItemTapped,
+        selectedItemColor: const Color(0xFF11D452),
+        unselectedItemColor: const Color(0xFF9CA3AF),
+        showUnselectedLabels: true,
+        items: const [
+          BottomNavigationBarItem(
+            icon: Icon(Icons.home_outlined),
+            activeIcon: Icon(Icons.home),
+            label: "Home",
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.document_scanner_outlined),
+            activeIcon: Icon(Icons.document_scanner),
+            label: "Scan",
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.groups_outlined),
+            activeIcon: Icon(Icons.groups),
+            label: "Community",
+          ),
+          // --- CHANGED FROM WEATHER TO MAP ---
+          BottomNavigationBarItem(
+            icon: Icon(Icons.map_outlined),
+            activeIcon: Icon(Icons.map),
+            label: "Map",
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHomeDashboard() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Welcome Text
+          Text(
+            "Welcome back, ${widget.userName}!",
+            style: const TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF1F2937),
+            ),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            "Manage your tea estate efficiently.",
+            style: TextStyle(fontSize: 14, color: Color(0xFF6B7280)),
+          ),
+          const SizedBox(height: 24),
+
+          // Main Scan Card
+          GestureDetector(
+            onTap: _showScanOptions,
+            child: Container(
               width: double.infinity,
-              padding: const EdgeInsets.all(24),
+              padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
-                color: Colors.white,
+                gradient: const LinearGradient(
+                  colors: [Color(0xFF11D452), Color(0xFF15803D)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: const Color(0xFF11D452)),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.05),
+                    color: const Color(0xFF11D452).withOpacity(0.3),
                     blurRadius: 10,
                     offset: const Offset(0, 4),
                   ),
                 ],
               ),
-              child: Column(
+              child: Row(
                 children: [
                   Container(
-                    width: 80,
-                    height: 80,
-                    decoration: const BoxDecoration(
-                      color: Color(0xFFDCFCE7),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.2),
                       shape: BoxShape.circle,
                     ),
-                    child: const Icon(
-                      Icons.camera_alt_rounded,
-                      color: Color(0xFF11D452),
-                      size: 40,
-                    ),
+                    child: const Icon(Icons.camera_enhance, color: Colors.white, size: 32),
                   ),
-                  const SizedBox(height: 16),
-                  const Text(
-                    "Scan Tea Leaf",
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: Color(0xFF1F2937),
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  const Text(
-                    "Check for diseases and get instant diagnosis",
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: Color(0xFF6B7280), fontSize: 14),
-                  ),
-                  const SizedBox(height: 24),
-
-                  // Camera button
-                  SizedBox(
-                    width: double.infinity,
-                    height: 50,
-                    child: ElevatedButton.icon(
-                      onPressed: _isUploading
-                          ? null
-                          : () => _scanLeaf(ImageSource.camera),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF15803D),
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        elevation: 0,
-                      ),
-                      icon: _isUploading
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(
-                                color: Colors.white,
-                                strokeWidth: 2,
-                              ),
-                            )
-                          : const Icon(Icons.camera_alt_outlined),
-                      label: Text(
-                        _isUploading ? "Analyzing..." : "Take Photo",
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ),
-
-                  const SizedBox(height: 12),
-
-                  // Select from gallery
-                  SizedBox(
-                    width: double.infinity,
-                    height: 50,
-                    child: OutlinedButton.icon(
-                      onPressed: _isUploading
-                          ? null
-                          : () => _scanLeaf(ImageSource.gallery),
-                      style: OutlinedButton.styleFrom(
-                        side: const BorderSide(color: Color(0xFF11D452)),
-                        foregroundColor: const Color(0xFF15803D),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      icon: const Icon(Icons.photo_library_outlined),
-                      label: const Text(
-                        "Pick from Gallery",
+                  const SizedBox(width: 16),
+                  const Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        "Identify Disease",
                         style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
-                    ),
+                      Text(
+                        "Tap to scan a leaf",
+                        style: TextStyle(
+                          color: Colors.white70,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
             ),
-            const SizedBox(height: 32),
-
-            // Quick Actions
-            const Text(
-              "Quick Actions",
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: Color(0xFF1F2937),
-              ),
-            ),
-            const SizedBox(height: 16),
-            GridView.count(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              crossAxisCount: 2,
-              crossAxisSpacing: 16,
-              mainAxisSpacing: 16,
-              childAspectRatio: 1.5,
-              children: [
-                _buildQuickAction(
-                  Icons.pest_control,
-                  Colors.red,
-                  "Disease Reports",
-                  "View history",
-                  () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) =>
-                            HistoryScreen(userId: widget.userId),
-                      ),
-                    );
-                  },
-                ),
-                _buildQuickAction(
-                  Icons.cloud,
-                  Colors.blue,
-                  "Weather Alerts",
-                  "Today's forecast",
-                  () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => const WeatherScreen(),
-                      ),
-                    );
-                  },
-                ),
-                _buildQuickAction(
-                  Icons.groups,
-                  Colors.green,
-                  "Community",
-                  "Ask farmers",
-                  () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => CommunityScreen(
-                          userId: widget.userId,
-                          userName: widget.userName,
-                        ),
-                      ),
-                    );
-                  },
-                ),
-                _buildQuickAction(
-                  Icons.forum,
-                  Colors.purple,
-                  "Help Chat",
-                  "Get support",
-                  () {},
-                ),
-              ],
-            ),
-            const SizedBox(height: 32),
-
-            // Recent Activity List
-            const Text(
-              "Recent Activity",
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: Color(0xFF1F2937),
-              ),
-            ),
-            const SizedBox(height: 16),
-            _history.isEmpty
-                ? const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 20),
-                    child: Center(
-                      child: Text(
-                        "No scans yet. Take a photo!",
-                        style: TextStyle(color: Colors.grey),
-                      ),
-                    ),
-                  )
-                : Column(
-                    children: _history.map((report) {
-                      return Container(
-                        margin: const EdgeInsets.only(bottom: 12),
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(12),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.05),
-                              blurRadius: 5,
-                            ),
-                          ],
-                        ),
-                        child: Row(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.all(10),
-                              decoration: BoxDecoration(
-                                color: report['disease_name'] == "Healthy Leaf"
-                                    ? const Color(0xFFDCFCE7)
-                                    : const Color(0xFFFEE2E2),
-                                shape: BoxShape.circle,
-                              ),
-                              child: Icon(
-                                Icons.spa,
-                                color: report['disease_name'] == "Healthy Leaf"
-                                    ? const Color(0xFF11D452)
-                                    : Colors.red,
-                                size: 24,
-                              ),
-                            ),
-                            const SizedBox(width: 16),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    report['disease_name'],
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w600,
-                                      fontSize: 14,
-                                    ),
-                                  ),
-                                  Text(
-                                    report['timestamp'],
-                                    style: const TextStyle(
-                                      color: Color(0xFF6B7280),
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            const Icon(
-                              Icons.chevron_right,
-                              color: Color(0xFF9CA3AF),
-                            ),
-                          ],
-                        ),
-                      );
-                    }).toList(),
-                  ),
-          ],
-        ),
-      ),
-
-      bottomNavigationBar: BottomNavigationBar(
-        type: BottomNavigationBarType.fixed,
-        selectedItemColor: const Color(0xFF11D452),
-        unselectedItemColor: const Color(0xFF9CA3AF),
-        showUnselectedLabels: true,
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.home), label: "Home"),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.document_scanner),
-            label: "Scan",
           ),
-          BottomNavigationBarItem(icon: Icon(Icons.forum), label: "Forum"),
-          BottomNavigationBarItem(icon: Icon(Icons.person), label: "Profile"),
+          const SizedBox(height: 32),
+
+          // --- QUICK ACTIONS GRID ---
+          const Text(
+            "Quick Actions",
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1F2937)),
+          ),
+          const SizedBox(height: 16),
+          GridView.count(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            crossAxisCount: 2,
+            crossAxisSpacing: 16,
+            mainAxisSpacing: 16,
+            childAspectRatio: 1.5,
+            children: [
+              // --- 1. WEATHER (Moved from Bottom Bar) ---
+              _buildQuickAction(
+                Icons.cloud_outlined, // Cloud Icon
+                Colors.blue,          // Weather Color
+                "Weather",
+                "Rain & Forecast",
+                () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => const WeatherScreen()),
+                  );
+                },
+              ),
+              
+              // 2. History
+              _buildQuickAction(
+                Icons.history_edu,
+                Colors.orange, // Changed color to differentiate
+                "Reports",
+                "Past scans",
+                () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => HistoryScreen(userId: widget.userId)),
+                  );
+                },
+              ),
+              
+              // 3. Expert Support
+              _buildQuickAction(
+                Icons.support_agent,
+                Colors.purple,
+                "Expert Help",
+                "Chat with pros",
+                () {},
+              ),
+              
+              // 4. Market Price
+              _buildQuickAction(
+                Icons.monetization_on_outlined,
+                Colors.green,
+                "Market Price",
+                "Check rates",
+                () {},
+              ),
+            ],
+          ),
+          const SizedBox(height: 32),
+
+          // Recent Activity
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                "Recent Scans",
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1F2937)),
+              ),
+              TextButton(
+                onPressed: () {
+                   Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => HistoryScreen(userId: widget.userId)),
+                  );
+                },
+                child: const Text("View All"),
+              )
+            ],
+          ),
+          const SizedBox(height: 8),
+          
+          _history.isEmpty
+            ? Container(
+                padding: const EdgeInsets.all(20),
+                width: double.infinity,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Center(child: Text("No scans yet. Start by scanning a leaf!")),
+              )
+            : Column(
+                children: _history.take(3).map((report) {
+                  return Card(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      side: BorderSide(color: Colors.grey.shade200),
+                    ),
+                    child: ListTile(
+                      leading: CircleAvatar(
+                        backgroundColor: report['disease_name'] == "Healthy Leaf" 
+                            ? const Color(0xFFDCFCE7) 
+                            : const Color(0xFFFEE2E2),
+                        child: Icon(
+                          Icons.spa, 
+                          color: report['disease_name'] == "Healthy Leaf" 
+                              ? const Color(0xFF15803D) 
+                              : Colors.red,
+                          size: 20,
+                        ),
+                      ),
+                      title: Text(
+                        report['disease_name'], 
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)
+                      ),
+                      subtitle: Text(
+                        report['timestamp'],
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                      trailing: const Icon(Icons.arrow_forward_ios, size: 14, color: Colors.grey),
+                    ),
+                  );
+                }).toList(),
+              ),
         ],
       ),
     );
@@ -520,18 +497,11 @@ class _HomeScreenState extends State<HomeScreen> {
               children: [
                 Text(
                   title,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w600,
-                    fontSize: 13,
-                    color: Color(0xFF1F2937),
-                  ),
+                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
                 ),
                 Text(
                   subtitle,
-                  style: const TextStyle(
-                    fontSize: 11,
-                    color: Color(0xFF6B7280),
-                  ),
+                  style: const TextStyle(fontSize: 11, color: Colors.grey),
                 ),
               ],
             ),
