@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException, Depends, UploadFile, File
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, validator
 from sqlalchemy import create_engine, Column, Integer, String, or_
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
@@ -15,6 +15,7 @@ from datetime import datetime
 from fastapi import Form 
 import pickle
 import uvicorn
+import re
 
 #DBConfig
 SQLALCHEMY_DATABASE_URL = "postgresql://postgres:admin123@localhost/teacare_db"
@@ -73,13 +74,37 @@ class ForumComment(Base):
 
 Base.metadata.create_all(bind=engine)
 
-# --- API REQUEST SCHEMAS ---
+# --- VALIDATION SCHEMAS ---
 class UserRegister(BaseModel):
-    full_name: str
-    contact_type: str  
+    full_name: str = Field(..., min_length=2, max_length=100)
+    contact_type: str 
     contact_value: str 
     secret: str        
-    role: str
+
+    @validator('contact_value')
+    def validate_contact(cls, v, values):
+        ctype = values.get('contact_type', '').lower()
+        if ctype == 'email':
+            # Simple Email Regex
+            if not re.match(r"[^@]+@[^@]+\.[^@]+", v):
+                raise ValueError("Invalid email address format")
+        elif ctype == 'phone':
+            # Allow digits, +, -, space. Min 9 digits.
+            if not re.match(r"^[\d\+\-\s]{9,15}$", v):
+                raise ValueError("Invalid phone number format")
+        return v
+
+    @validator('secret')
+    def validate_secret(cls, v, values):
+        ctype = values.get('contact_type', '').lower()
+        if ctype == 'phone':
+            if not v.isdigit() or len(v) < 4:
+                raise ValueError("PIN must be at least 4 digits")
+        elif ctype == 'email':
+            if len(v) < 6:
+                raise ValueError("Password must be at least 6 characters")
+        return v
+
 
 class LoginRequest(BaseModel):
     identifier: str 
@@ -94,24 +119,33 @@ def get_db():
     finally:
         db.close()
 
+# endpoint message
+@app.get("/")
+def read_root():
+    return {"message": "TeaCare Backend is Running!"}
+
 @app.post("/register")
 def register(user: UserRegister, db: Session = Depends(get_db)):
-    # 1. Check if user exists (Check both columns)
+    # 1. Normalize Inputs
+    c_type = user.contact_type
+    c_val = user.contact_value.lower() if c_type == 'email' else user.contact_value
+
+    # 2. Check if user exists
     existing_user = db.query(User).filter(
-        or_(User.phone_number == user.contact_value, User.email == user.contact_value)
+        or_(User.phone_number == c_val, User.email == c_val)
     ).first()
     
     if existing_user:
-        raise HTTPException(status_code=400, detail="User already registered")
+        raise HTTPException(status_code=400, detail="User already registered with this phone/email")
 
-    # 2. Prepare data based on contact type
-    new_phone = user.contact_value if user.contact_type == "phone" else None
-    new_email = user.contact_value if user.contact_type == "email" else None
+    # 3. Prepare Data
+    new_phone = c_val if c_type == "phone" else None
+    new_email = c_val if c_type == "email" else None
     
-    # 3. Hash the secret (PIN or Password)
+    # 4. Hash Password (Argon2)
     hashed_secret = get_password_hash(user.secret)
 
-    # 4. Save
+    # 5. Save
     new_user = User(
         full_name=user.full_name,
         phone_number=new_phone,
@@ -211,77 +245,6 @@ os.makedirs("uploads", exist_ok=True)
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 
-# endpoint message
-@app.get("/")
-def read_root():
-    return {"message": "TeaCare Backend is Running!"}
-
-
-@app.post("/predict")
-async def predict_disease(
-    user_id: int,
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db)
-):
-    file_location = f"uploads/{file.filename}"
-    with open(file_location, "wb") as buffer:
-        file.file.seek(0)
-        content = await file.read()
-        buffer.write(content)
-
-    image = Image.open(io.BytesIO(content)).convert('RGB')
-    image = image.resize((224, 224))
-    input_array = np.array(image, dtype=np.float32) / 255.0
-    input_array = np.expand_dims(input_array, axis=0)
-
-    interpreter.set_tensor(input_details[0]['index'], input_array)
-    interpreter.invoke()
-    output_data = interpreter.get_tensor(output_details[0]['index'])
-
-    confidence_score = np.max(output_data) * 100
-    predicted_index = np.argmax(output_data)
-
-    MINIMUM_CONFIDENCE = 50.0
-
-    if confidence_score < MINIMUM_CONFIDENCE:
-        disease_name = "Unknown"
-        treatment = "Image unclear. Please retake the photo."
-        symptoms = ["No reliable disease signs detected."]
-    else:
-        disease_name = CLASS_NAMES[predicted_index]
-
-        if disease_name == "Healthy Leaf":
-            treatment = "No treatment needed."
-            symptoms = ["Leaf appears healthy."]
-        elif disease_name == "Tea Algal Leaf Spot":
-            treatment = "Improve drainage and pruning. Apply Copper Oxychloride."
-            symptoms = ["Greenish-grey spots", "Velvety texture"]
-        elif disease_name == "Red Spider":
-            treatment = "Spray Sulfur-based acaricides. Maintain humidity."
-            symptoms = ["Reddish discoloration", "Webbing under leaves"]
-        else:
-            treatment = "Consult an expert or apply fungicide."
-            symptoms = ["Disease patterns detected."]
-
-    print(f"SAVING REPORT: User {user_id} - {disease_name} ({confidence_score:.2f}%)")
-
-    new_report = DiseaseReport(
-        user_id=user_id,
-        disease_name=disease_name,
-        confidence=f"{confidence_score:.1f}%",
-        image_url=file_location,
-        timestamp=datetime.now().strftime("%Y-%m-%d %H:%M")
-    )
-    db.add(new_report)
-    db.commit()
-
-    return {
-        "disease_name": disease_name,
-        "confidence": f"{confidence_score:.1f}%",
-        "symptoms": symptoms,
-        "treatment": treatment,
-        "image_url": file_location
-    }
 
 #Recent scans
 @app.get("/history/{user_id}")

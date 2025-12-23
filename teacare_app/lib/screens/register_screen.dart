@@ -16,28 +16,74 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final TextEditingController _secretCtrl = TextEditingController();
 
   // State Variables
-  String _registerMethod = "Phone"; // "Phone" or "Email"
+  String _registerMethod = "Phone"; 
   String _selectedRole = "Farmer";
   bool _isLoading = false;
 
   final List<String> _roles = ["Farmer", "Researcher", "Expert"];
+  
+  // UPDATE THIS IP TO MATCH YOUR PC
   final String serverUrl = "http://192.168.8.122:8000/register"; 
+
+  // --- HELPER: Parse Backend Errors Safely ---
+  String _getBackendError(String responseBody) {
+    try {
+      final data = jsonDecode(responseBody);
+      final detail = data['detail'];
+
+      // Case 1: Standard Error (String) -> "User already registered"
+      if (detail is String) {
+        return detail;
+      }
+      // Case 2: Validation Error (List) -> [{"msg": "Invalid email", ...}]
+      if (detail is List && detail.isNotEmpty) {
+        return detail[0]['msg'] ?? "Invalid Input";
+      }
+      return "Registration failed";
+    } catch (e) {
+      return "Server Error: $e";
+    }
+  }
 
   // --- LOGIC ---
   Future<void> _handleRegister() async {
-    if (_nameCtrl.text.isEmpty || _contactCtrl.text.isEmpty || _secretCtrl.text.isEmpty) {
+    // 1. Basic Empty Check
+    if (_nameCtrl.text.trim().isEmpty || 
+        _contactCtrl.text.trim().isEmpty || 
+        _secretCtrl.text.trim().isEmpty) {
       _showError("Please fill all fields");
       return;
     }
 
-    // Validation
-    if (_registerMethod == "Phone" && _secretCtrl.text.length < 4) {
-      _showError("PIN must be at least 4 digits");
-      return;
-    }
-    if (_registerMethod == "Email" && _secretCtrl.text.length < 6) {
-      _showError("Password must be at least 6 characters");
-      return;
+    String contactVal = _contactCtrl.text.trim();
+    String secretVal = _secretCtrl.text.trim();
+
+    // 2. CLIENT-SIDE VALIDATION
+    if (_registerMethod == "Phone") {
+      // Regex: Only numbers allowed
+      if (!RegExp(r'^[0-9]+$').hasMatch(contactVal)) {
+        _showError("Phone number must contain only digits.");
+        return;
+      }
+      if (contactVal.length < 15) {
+        _showError("Phone number is too short.");
+        return;
+      }
+      if (secretVal.length < 4) {
+        _showError("PIN must be at least 4 digits.");
+        return;
+      }
+    } else {
+      // Email Validation
+      final emailRegex = RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$');
+      if (!emailRegex.hasMatch(contactVal)) {
+        _showError("Please enter a valid email address.");
+        return;
+      }
+      if (secretVal.length < 6) {
+        _showError("Password must be at least 6 characters.");
+        return;
+      }
     }
 
     setState(() => _isLoading = true);
@@ -47,10 +93,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
         Uri.parse(serverUrl),
         headers: {"Content-Type": "application/json"},
         body: jsonEncode({
-          "full_name": _nameCtrl.text,
-          "contact_type": _registerMethod.toLowerCase(), // "phone" or "email"
-          "contact_value": _contactCtrl.text,
-          "secret": _secretCtrl.text,
+          "full_name": _nameCtrl.text.trim(),
+          "contact_type": _registerMethod.toLowerCase(),
+          "contact_value": contactVal,
+          "secret": secretVal,
           "role": _selectedRole
         }),
       );
@@ -58,29 +104,39 @@ class _RegisterScreenState extends State<RegisterScreen> {
       if (response.statusCode == 200) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text("Registered! Please Login."), backgroundColor: Colors.green));
+            content: Text("Registered! Please Login."), 
+            backgroundColor: Colors.green
+          ));
           Navigator.pop(context);
         }
       } else {
-        final data = jsonDecode(response.body);
-        _showError(data['detail'] ?? "Registration failed");
+        // Use the safe helper here
+        _showError(_getBackendError(response.body));
       }
     } catch (e) {
-      _showError("Connection error: $e");
+      _showError("Connection error. Check your server.");
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
   void _showError(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.red));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg), backgroundColor: Colors.red)
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF6F8F6),
-      appBar: AppBar(title: const Text("Create Account"), backgroundColor: Colors.transparent, elevation: 0, foregroundColor: Colors.black),
+      appBar: AppBar(
+        title: const Text("Create Account"), 
+        backgroundColor: Colors.transparent, 
+        elevation: 0, 
+        foregroundColor: Colors.black
+      ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(24.0),
         child: Column(
@@ -119,7 +175,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
               controller: _secretCtrl,
               keyboardType: _registerMethod == "Phone" ? TextInputType.number : TextInputType.text,
               obscureText: true,
-              maxLength: _registerMethod == "Phone" ? 4 : null, // Limit PIN length visually
+              maxLength: _registerMethod == "Phone" ? 4 : null,
               decoration: _inputDecor(
                 _registerMethod == "Phone" ? "Create 4-digit PIN" : "Create Password",
                 Icons.lock,
@@ -147,8 +203,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
               height: 50,
               child: ElevatedButton(
                 onPressed: _isLoading ? null : _handleRegister,
-                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF11D452), foregroundColor: Colors.white),
-                child: _isLoading ? const CircularProgressIndicator(color: Colors.white) : const Text("Register"),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF11D452), 
+                  foregroundColor: Colors.white
+                ),
+                child: _isLoading 
+                  ? const CircularProgressIndicator(color: Colors.white) 
+                  : const Text("Register"),
               ),
             ),
           ],
@@ -190,7 +251,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     return InputDecoration(
       filled: true, fillColor: Colors.white, hintText: hint, prefixIcon: Icon(icon, color: Colors.grey),
       border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
-      counterText: "" // Hide character counter
+      counterText: "" 
     );
   }
 }

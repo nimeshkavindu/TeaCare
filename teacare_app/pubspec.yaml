@@ -37,6 +37,9 @@ dependencies:
   http: ^1.6.0
   image_picker: ^1.2.1
   shared_preferences: ^2.5.4
+  camera: ^0.10.5+9
+  google_maps_flutter: ^2.5.3
+  geolocator: ^10.1.0 
 
 dev_dependencies:
   flutter_test:
