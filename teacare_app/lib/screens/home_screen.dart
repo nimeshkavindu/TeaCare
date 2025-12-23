@@ -20,7 +20,7 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final ImagePicker _picker = ImagePicker();
-  bool _isUploading = false;
+  bool _isUploading = false; // Controls the "Analyzing" screen
   List<dynamic> _history = [];
   
   // Ensure this IP matches your setup
@@ -98,12 +98,13 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // --- SCAN LOGIC ---
+  // --- SCAN LOGIC (FIXED) ---
   Future<void> _scanLeaf(ImageSource source) async {
     try {
       final XFile? photo = await _picker.pickImage(source: source);
       if (photo == null) return;
 
+      // 1. Show Loading Screen
       setState(() => _isUploading = true);
 
       var request = http.MultipartRequest('POST', Uri.parse(serverUrl));
@@ -115,32 +116,44 @@ class _HomeScreenState extends State<HomeScreen> {
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        _fetchHistory();
 
-        if (mounted) {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => DiagnosisScreen(
-                diseaseName: data['disease_name'],
-                confidence: data['confidence'],
-                imagePath: photo.path,
-                treatment: data['treatment'],
-                symptoms: data['symptoms'] ?? [],
+        // Check if the backend sent a "soft error" (like Blurry Image)
+        if (data.containsKey('error')) {
+          _showError(data['error']); // Show "Image is too blurry"
+        } 
+        else {
+          // Only navigate if we actually have data
+          _fetchHistory();
+
+          if (mounted) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => DiagnosisScreen(
+                  // Use '?? 0' to provide a fallback if report_id is missing (Safety)
+                  reportId: data['report_id'] ?? 0, 
+                  diseaseName: data['disease_name'] ?? "Unknown",
+                  confidence: data['confidence'] ?? "0%",
+                  imagePath: photo.path,
+                  treatment: data['treatment'] ?? "No treatment info",
+                  symptoms: data['symptoms'] ?? [],
+                ),
               ),
-            ),
-          );
+            );
+          }
         }
+        // --- FIX ENDS HERE ---
       } else {
+        // Handle Server Error (500, 404, etc)
         _showError("Server Error: ${response.statusCode}");
       }
     } catch (e) {
-      _showError("Connection Failed: $e");
+      _showError("Connection Failed. Check your internet.");
     } finally {
+      // 2. Hide Loading Screen
       if (mounted) setState(() => _isUploading = false);
     }
   }
-
   void _showError(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -150,17 +163,15 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // --- UPDATED PAGE LIST (Map is now Index 3) ---
     final List<Widget> pages = [
       _buildHomeDashboard(),
       const SizedBox(), 
       CommunityScreen(userId: widget.userId, userName: widget.userName),
-      const HeatMapScreen(), // <--- NEW POSITION
+      const HeatMapScreen(), 
     ];
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8F9FA),
-
       // --- APP BAR ---
       appBar: AppBar(
         backgroundColor: Colors.white,
@@ -211,9 +222,53 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
       ),
 
-      body: pages[_selectedIndex],
+      // --- BODY WITH LOADING OVERLAY ---
+      body: Stack(
+        children: [
+          // 1. The Main Content
+          pages[_selectedIndex],
 
-      // --- BOTTOM NAVIGATION (Updated) ---
+          // 2. The Analyzing Overlay
+          if (_isUploading)
+            Container(
+              color: Colors.black.withOpacity(0.6),
+              width: double.infinity,
+              height: double.infinity,
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const CircularProgressIndicator(
+                      color: Color(0xFF11D452),
+                      backgroundColor: Colors.white,
+                    ),
+                    const SizedBox(height: 20),
+                    const Text(
+                      "Analyzing Leaf...",
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        decoration: TextDecoration.none,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      "Please wait while AI detects issues",
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.8),
+                        fontSize: 14,
+                        decoration: TextDecoration.none,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+
+      // --- BOTTOM NAVIGATION ---
       bottomNavigationBar: BottomNavigationBar(
         type: BottomNavigationBarType.fixed,
         currentIndex: _selectedIndex,
@@ -237,7 +292,6 @@ class _HomeScreenState extends State<HomeScreen> {
             activeIcon: Icon(Icons.groups),
             label: "Community",
           ),
-          // --- CHANGED FROM WEATHER TO MAP ---
           BottomNavigationBarItem(
             icon: Icon(Icons.map_outlined),
             activeIcon: Icon(Icons.map),
@@ -342,10 +396,9 @@ class _HomeScreenState extends State<HomeScreen> {
             mainAxisSpacing: 16,
             childAspectRatio: 1.5,
             children: [
-              // --- 1. WEATHER (Moved from Bottom Bar) ---
               _buildQuickAction(
-                Icons.cloud_outlined, // Cloud Icon
-                Colors.blue,          // Weather Color
+                Icons.cloud_outlined, 
+                Colors.blue,          
                 "Weather",
                 "Rain & Forecast",
                 () {
@@ -356,10 +409,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 },
               ),
               
-              // 2. History
               _buildQuickAction(
                 Icons.history_edu,
-                Colors.orange, // Changed color to differentiate
+                Colors.orange, 
                 "Reports",
                 "Past scans",
                 () {
@@ -370,7 +422,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 },
               ),
               
-              // 3. Expert Support
               _buildQuickAction(
                 Icons.support_agent,
                 Colors.purple,
@@ -379,7 +430,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 () {},
               ),
               
-              // 4. Market Price
               _buildQuickAction(
                 Icons.monetization_on_outlined,
                 Colors.green,
