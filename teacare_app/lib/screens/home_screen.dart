@@ -20,10 +20,9 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final ImagePicker _picker = ImagePicker();
-  bool _isUploading = false; // Controls the "Analyzing" screen
+  bool _isUploading = false;
   List<dynamic> _history = [];
 
-  // Ensure this IP matches your setup
   final String serverUrl = "http://192.168.8.122:8000/predict";
 
   int _selectedIndex = 0;
@@ -34,7 +33,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _fetchHistory();
   }
 
-  // --- NAVIGATION LOGIC ---
+  // --- NAVIGATION LOGIC (UNCHANGED) ---
   void _onItemTapped(int index) {
     if (index == 1) {
       _showScanOptions();
@@ -49,33 +48,68 @@ class _HomeScreenState extends State<HomeScreen> {
   void _showScanOptions() {
     showModalBottomSheet(
       context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
+      backgroundColor: Colors.transparent,
       builder: (BuildContext bc) {
-        return SafeArea(
-          child: Wrap(
-            children: <Widget>[
-              ListTile(
-                leading: const Icon(Icons.camera_alt, color: Color(0xFF11D452)),
-                title: const Text('Take Photo'),
-                onTap: () {
-                  Navigator.pop(context);
-                  _scanLeaf(ImageSource.camera);
-                },
-              ),
-              ListTile(
-                leading: const Icon(
-                  Icons.photo_library,
-                  color: Color(0xFF15803D),
+        return Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: SafeArea(
+            child: Wrap(
+              children: <Widget>[
+                Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.grey[300],
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
                 ),
-                title: const Text('Choose from Gallery'),
-                onTap: () {
-                  Navigator.pop(context);
-                  _scanLeaf(ImageSource.gallery);
-                },
-              ),
-            ],
+                ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.green.withOpacity(0.1),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.camera_alt, color: Colors.green),
+                  ),
+                  title: const Text(
+                    'Take Photo',
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _scanLeaf(ImageSource.camera);
+                  },
+                ),
+                ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.withOpacity(0.1),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.photo_library, color: Colors.blue),
+                  ),
+                  title: const Text(
+                    'Choose from Gallery',
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _scanLeaf(ImageSource.gallery);
+                  },
+                ),
+                const SizedBox(height: 20),
+              ],
+            ),
           ),
         );
       },
@@ -101,13 +135,12 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // --- SCAN LOGIC (FIXED) ---
+  // --- SCAN LOGIC ---
   Future<void> _scanLeaf(ImageSource source) async {
     try {
       final XFile? photo = await _picker.pickImage(source: source);
       if (photo == null) return;
 
-      // 1. Show Loading Screen
       setState(() => _isUploading = true);
 
       var request = http.MultipartRequest('POST', Uri.parse(serverUrl));
@@ -120,11 +153,9 @@ class _HomeScreenState extends State<HomeScreen> {
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
 
-        // Check if the backend sent a "soft error" (like Blurry Image)
         if (data.containsKey('error')) {
-          _showError(data['error']); // Show "Image is too blurry"
+          _showError(data['error']);
         } else {
-          // Only navigate if we actually have data
           _fetchHistory();
 
           if (mounted) {
@@ -132,31 +163,24 @@ class _HomeScreenState extends State<HomeScreen> {
               context,
               MaterialPageRoute(
                 builder: (context) => DiagnosisScreen(
-                  // Use '??' to provide fallbacks for safety
                   reportId: data['report_id'] ?? 0,
                   diseaseName: data['disease_name'] ?? "Unknown",
                   confidence: data['confidence'] ?? "0%",
                   imagePath: photo.path,
-                  // --- FIXES START HERE ---
-                  // Removed 'treatment' (singular)
-                  // Added 'causes' and 'treatments' (plural lists)
                   symptoms: data['symptoms'] ?? [],
                   causes: data['causes'] ?? [],
                   treatments: data['treatments'] ?? [],
-                  // --- FIXES END HERE ---
                 ),
               ),
             );
           }
         }
       } else {
-        // Handle Server Error (500, 404, etc)
         _showError("Server Error: ${response.statusCode}");
       }
     } catch (e) {
       _showError("Connection Failed. Check your internet.");
     } finally {
-      // 2. Hide Loading Screen
       if (mounted) setState(() => _isUploading = false);
     }
   }
@@ -168,6 +192,12 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  //Colors
+  final Color kPrimaryGreen = const Color(0xFF4CAF50);
+  final Color kDarkGreen = const Color(0xFF2E7D32);
+  final Color kBackground = const Color(0xFFF3F6F8);
+  final Color kTextMain = const Color(0xFF1F2937);
+
   @override
   Widget build(BuildContext context) {
     final List<Widget> pages = [
@@ -178,68 +208,113 @@ class _HomeScreenState extends State<HomeScreen> {
     ];
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF8F9FA),
-      // --- APP BAR ---
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        automaticallyImplyLeading: false,
-        title: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: const BoxDecoration(
-                color: Color(0xFF11D452),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(Icons.spa, color: Colors.white, size: 20),
-            ),
-            const SizedBox(width: 12),
-            const Text(
-              "TeaCare",
-              style: TextStyle(
-                color: Color(0xFF1F2937),
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(
-              Icons.notifications_outlined,
-              color: Color(0xFF6B7280),
-            ),
-            onPressed: () {},
-          ),
-          Padding(
-            padding: const EdgeInsets.only(right: 16),
-            child: GestureDetector(
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) =>
-                        ProfileScreen(userName: widget.userName),
-                  ),
-                );
-              },
-              child: const CircleAvatar(
-                backgroundColor: Color(0xFFFFE0B2),
-                child: Icon(Icons.person, color: Colors.orange),
-              ),
-            ),
-          ),
-        ],
-      ),
+      backgroundColor: kBackground,
 
-      // --- BODY WITH LOADING OVERLAY ---
+      // Custom AppBar
+      appBar: _selectedIndex == 0
+          ? AppBar(
+              backgroundColor: kBackground,
+              elevation: 0,
+              toolbarHeight: 70,
+              title: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: kPrimaryGreen.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(Icons.eco, color: kPrimaryGreen, size: 24),
+                  ),
+                  const SizedBox(width: 12),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        "TeaCare",
+                        style: TextStyle(
+                          color: kTextMain,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      Text(
+                        "Disease Management",
+                        style: TextStyle(
+                          color: Colors.grey[500],
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 1.0,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              actions: [
+                Stack(
+                  children: [
+                    IconButton(
+                      icon: const Icon(
+                        Icons.notifications_none_rounded,
+                        size: 28,
+                      ),
+                      color: Colors.grey[600],
+                      onPressed: () {},
+                    ),
+                    Positioned(
+                      top: 10,
+                      right: 10,
+                      child: Container(
+                        width: 10,
+                        height: 10,
+                        decoration: BoxDecoration(
+                          color: Colors.red,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: kBackground, width: 2),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(right: 16, left: 8),
+                  child: GestureDetector(
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) =>
+                              ProfileScreen(userName: widget.userName),
+                        ),
+                      );
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.all(2),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.grey[300]!, width: 2),
+                      ),
+                      child: const CircleAvatar(
+                        radius: 18,
+                        backgroundColor: Color(0xFFFFE0B2),
+                        child: Icon(
+                          Icons.person,
+                          color: Colors.orange,
+                          size: 20,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            )
+          : null, // Only show custom AppBar on Home
+
       body: Stack(
         children: [
-          // 1. The Main Content
           pages[_selectedIndex],
 
-          // 2. The Analyzing Overlay
           if (_isUploading)
             Container(
               color: Colors.black.withOpacity(0.6),
@@ -249,10 +324,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const CircularProgressIndicator(
-                      color: Color(0xFF11D452),
-                      backgroundColor: Colors.white,
-                    ),
+                    const CircularProgressIndicator(color: Colors.white),
                     const SizedBox(height: 20),
                     const Text(
                       "Analyzing Leaf...",
@@ -265,7 +337,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      "Please wait while AI detects symptoms",
+                      "Please wait while AI detects issues",
                       style: TextStyle(
                         color: Colors.white.withOpacity(0.8),
                         fontSize: 14,
@@ -279,114 +351,219 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
       ),
 
-      // --- BOTTOM NAVIGATION ---
-      bottomNavigationBar: BottomNavigationBar(
-        type: BottomNavigationBarType.fixed,
-        currentIndex: _selectedIndex,
-        onTap: _onItemTapped,
-        selectedItemColor: const Color(0xFF11D452),
-        unselectedItemColor: const Color(0xFF9CA3AF),
-        showUnselectedLabels: true,
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.home_outlined),
-            activeIcon: Icon(Icons.home),
-            label: "Home",
+      // --- BOTTOM NAVIGATION BAR ---
+      bottomNavigationBar: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 20,
+              offset: const Offset(0, -5),
+            ),
+          ],
+        ),
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                _buildNavItem(0, Icons.home_rounded, "Home"),
+                _buildNavItem(1, Icons.qr_code_scanner_rounded, "Scan"),
+                _buildNavItem(2, Icons.forum_rounded, "Community"),
+                _buildNavItem(3, Icons.map_rounded, "Map"),
+              ],
+            ),
           ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.document_scanner_outlined),
-            activeIcon: Icon(Icons.document_scanner),
-            label: "Scan",
+        ),
+      ),
+    );
+  }
+
+  // Custom Bottom Nav Item
+  Widget _buildNavItem(int index, IconData icon, String label) {
+    bool isSelected = _selectedIndex == index;
+    return GestureDetector(
+      onTap: () => _onItemTapped(index),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+            decoration: isSelected
+                ? BoxDecoration(
+                    color: kPrimaryGreen.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(20),
+                  )
+                : null,
+            child: Icon(
+              icon,
+              color: isSelected ? kPrimaryGreen : Colors.grey[400],
+              size: 26,
+            ),
           ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.groups_outlined),
-            activeIcon: Icon(Icons.groups),
-            label: "Community",
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.map_outlined),
-            activeIcon: Icon(Icons.map),
-            label: "Map",
+          const SizedBox(height: 4),
+          Text(
+            label,
+            style: TextStyle(
+              color: isSelected ? kPrimaryGreen : Colors.grey[400],
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+            ),
           ),
         ],
       ),
     );
   }
 
+  // --- MAIN DASHBOARD CONTENT ---
   Widget _buildHomeDashboard() {
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Welcome Text
+          // 1. Greeting
           Text(
-            "Welcome back, ${widget.userName}!",
-            style: const TextStyle(
-              fontSize: 22,
+            "Hello, ${widget.userName.split(' ')[0]}! 👋",
+            style: TextStyle(
+              fontSize: 24,
               fontWeight: FontWeight.bold,
-              color: Color(0xFF1F2937),
+              color: kTextMain,
             ),
           ),
-          const SizedBox(height: 4),
-          const Text(
-            "Manage your tea estate efficiently.",
-            style: TextStyle(fontSize: 14, color: Color(0xFF6B7280)),
+          const SizedBox(height: 6),
+          Text(
+            "Ready to check your tea plants today?",
+            style: TextStyle(fontSize: 14, color: Colors.grey[600]),
           ),
           const SizedBox(height: 24),
 
-          // Main Scan Card
+          // 2. HERO CARD (Identify Disease)
           GestureDetector(
             onTap: _showScanOptions,
             child: Container(
               width: double.infinity,
-              padding: const EdgeInsets.all(20),
+              height: 200,
               decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [Color(0xFF11D452), Color(0xFF15803D)],
+                gradient: LinearGradient(
+                  colors: [kPrimaryGreen, kDarkGreen],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                 ),
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: BorderRadius.circular(24),
                 boxShadow: [
                   BoxShadow(
-                    color: const Color(0xFF11D452).withOpacity(0.3),
-                    blurRadius: 10,
-                    offset: const Offset(0, 4),
+                    color: kPrimaryGreen.withOpacity(0.4),
+                    blurRadius: 20,
+                    offset: const Offset(0, 10),
                   ),
                 ],
               ),
-              child: Row(
+              child: Stack(
                 children: [
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.2),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(
-                      Icons.camera_enhance,
-                      color: Colors.white,
-                      size: 32,
+                  // Decorative Background Circles
+                  Positioned(
+                    top: -20,
+                    right: -20,
+                    child: CircleAvatar(
+                      radius: 60,
+                      backgroundColor: Colors.white.withOpacity(0.1),
                     ),
                   ),
-                  const SizedBox(width: 16),
-                  const Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        "Identify Disease",
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
+                  Positioned(
+                    bottom: -30,
+                    left: 20,
+                    child: CircleAvatar(
+                      radius: 50,
+                      backgroundColor: Colors.white.withOpacity(0.1),
+                    ),
+                  ),
+
+                  // Content
+                  Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withOpacity(0.2),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: const Icon(
+                                    Icons.center_focus_weak,
+                                    color: Colors.white,
+                                    size: 24,
+                                  ),
+                                ),
+                                const SizedBox(height: 16),
+                                const Text(
+                                  "Identify\nDisease",
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 22,
+                                    fontWeight: FontWeight.bold,
+                                    height: 1.1,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: const BoxDecoration(
+                                color: Colors.white,
+                                shape: BoxShape.circle,
+                              ),
+                              child: Icon(
+                                Icons.arrow_forward,
+                                color: kPrimaryGreen,
+                              ),
+                            ),
+                          ],
                         ),
-                      ),
-                      Text(
-                        "Tap to scan a leaf",
-                        style: TextStyle(color: Colors.white70, fontSize: 14),
-                      ),
-                    ],
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Text(
+                            "Tap to scan leaf",
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // Big Leaf Icon Decoration
+                  Positioned(
+                    bottom: -20,
+                    right: -20,
+                    child: Icon(
+                      Icons.spa,
+                      size: 140,
+                      color: Colors.white.withOpacity(0.15),
+                    ),
                   ),
                 ],
               ),
@@ -394,13 +571,13 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           const SizedBox(height: 32),
 
-          // --- QUICK ACTIONS GRID ---
-          const Text(
+          // 3. QUICK ACTIONS
+          Text(
             "Quick Actions",
             style: TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.bold,
-              color: Color(0xFF1F2937),
+              color: kTextMain,
             ),
           ),
           const SizedBox(height: 16),
@@ -410,10 +587,10 @@ class _HomeScreenState extends State<HomeScreen> {
             crossAxisCount: 2,
             crossAxisSpacing: 16,
             mainAxisSpacing: 16,
-            childAspectRatio: 1.5,
+            childAspectRatio: 1.4, // Making cards slightly wider
             children: [
-              _buildQuickAction(
-                Icons.cloud_outlined,
+              _buildModernActionCard(
+                Icons.wb_sunny_rounded,
                 Colors.blue,
                 "Weather",
                 "Rain & Forecast",
@@ -426,9 +603,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   );
                 },
               ),
-
-              _buildQuickAction(
-                Icons.history_edu,
+              _buildModernActionCard(
+                Icons.description_rounded,
                 Colors.orange,
                 "Reports",
                 "Past scans",
@@ -442,40 +618,38 @@ class _HomeScreenState extends State<HomeScreen> {
                   );
                 },
               ),
-
-              _buildQuickAction(
-                Icons.support_agent,
+              _buildModernActionCard(
+                Icons.support_agent_rounded,
                 Colors.purple,
                 "Expert Help",
                 "Chat with pros",
                 () {},
               ),
-
-              _buildQuickAction(
-                Icons.monetization_on_outlined,
+              _buildModernActionCard(
+                Icons.currency_exchange_rounded,
                 Colors.green,
                 "Market Price",
-                "Check rates",
+                "Live rates",
                 () {},
               ),
             ],
           ),
           const SizedBox(height: 32),
 
-          // Recent Activity
+          // 4. RECENT SCANS
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text(
+              Text(
                 "Recent Scans",
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
-                  color: Color(0xFF1F2937),
+                  color: kTextMain,
                 ),
               ),
-              TextButton(
-                onPressed: () {
+              GestureDetector(
+                onTap: () {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
@@ -484,73 +658,67 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   );
                 },
-                child: const Text("View All"),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: kPrimaryGreen.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    "View All",
+                    style: TextStyle(
+                      color: kDarkGreen,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
               ),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 16),
 
           _history.isEmpty
               ? Container(
-                  padding: const EdgeInsets.all(20),
+                  padding: const EdgeInsets.all(30),
                   width: double.infinity,
                   decoration: BoxDecoration(
                     color: Colors.white,
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(20),
                   ),
-                  child: const Center(
-                    child: Text("No scans yet. Start by scanning a leaf!"),
+                  child: Column(
+                    children: [
+                      Icon(
+                        Icons.qr_code_scanner,
+                        size: 40,
+                        color: Colors.grey[300],
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        "No scans yet",
+                        style: TextStyle(color: Colors.grey[500]),
+                      ),
+                    ],
                   ),
                 )
               : Column(
-                  children: _history.take(3).map((report) {
-                    return Card(
-                      margin: const EdgeInsets.only(bottom: 12),
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        side: BorderSide(color: Colors.grey.shade200),
-                      ),
-                      child: ListTile(
-                        leading: CircleAvatar(
-                          backgroundColor:
-                              report['disease_name'] == "Healthy Leaf"
-                              ? const Color(0xFFDCFCE7)
-                              : const Color(0xFFFEE2E2),
-                          child: Icon(
-                            Icons.spa,
-                            color: report['disease_name'] == "Healthy Leaf"
-                                ? const Color(0xFF15803D)
-                                : Colors.red,
-                            size: 20,
-                          ),
-                        ),
-                        title: Text(
-                          report['disease_name'],
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14,
-                          ),
-                        ),
-                        subtitle: Text(
-                          report['timestamp'],
-                          style: const TextStyle(fontSize: 12),
-                        ),
-                        trailing: const Icon(
-                          Icons.arrow_forward_ios,
-                          size: 14,
-                          color: Colors.grey,
-                        ),
-                      ),
-                    );
-                  }).toList(),
+                  children: _history
+                      .take(3)
+                      .map((report) => _buildRecentScanCard(report))
+                      .toList(),
                 ),
+          const SizedBox(height: 20),
         ],
       ),
     );
   }
 
-  Widget _buildQuickAction(
+  // --- HELPER WIDGETS ---
+
+  Widget _buildModernActionCard(
     IconData icon,
     Color color,
     String title,
@@ -563,9 +731,13 @@ class _HomeScreenState extends State<HomeScreen> {
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(20),
           boxShadow: [
-            BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 5),
+            BoxShadow(
+              color: Colors.black.withOpacity(0.03),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
           ],
         ),
         child: Column(
@@ -573,31 +745,123 @@ class _HomeScreenState extends State<HomeScreen> {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Container(
-              padding: const EdgeInsets.all(8),
+              width: 38,
+              height: 38,
               decoration: BoxDecoration(
                 color: color.withOpacity(0.1),
-                shape: BoxShape.circle,
+                borderRadius: BorderRadius.circular(12),
               ),
-              child: Icon(icon, color: color, size: 24),
+              child: Icon(icon, color: color, size: 20),
             ),
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   title,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w600,
-                    fontSize: 13,
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                    color: kTextMain,
                   ),
                 ),
+                const SizedBox(height: 2),
                 Text(
                   subtitle,
-                  style: const TextStyle(fontSize: 11, color: Colors.grey),
+                  style: TextStyle(fontSize: 11, color: Colors.grey[500]),
                 ),
               ],
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildRecentScanCard(dynamic report) {
+    bool isHealthy = report['disease_name'] == "Healthy Leaf";
+    Color statusColor = isHealthy
+        ? Colors.green
+        : (report['disease_name'].toString().contains("Spider")
+              ? Colors.orange
+              : Colors.red);
+    Color statusBg = statusColor.withOpacity(0.1);
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.02),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              color: statusBg,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(
+              isHealthy
+                  ? Icons.check_circle_outline
+                  : Icons.warning_amber_rounded,
+              color: statusColor,
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  report['disease_name'],
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15,
+                    color: kTextMain,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: statusBg,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        isHealthy ? "Healthy" : "High Risk",
+                        style: TextStyle(
+                          color: statusColor,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      report['timestamp'],
+                      style: TextStyle(fontSize: 11, color: Colors.grey[400]),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          Icon(Icons.chevron_right, color: Colors.grey[300]),
+        ],
       ),
     );
   }

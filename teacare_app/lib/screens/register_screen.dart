@@ -16,14 +16,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final TextEditingController _secretCtrl = TextEditingController();
 
   // State Variables
-  String _registerMethod = "Phone"; 
+  String _registerMethod = "Phone";
   String _selectedRole = "Farmer";
   bool _isLoading = false;
 
   final List<String> _roles = ["Farmer", "Researcher", "Expert"];
-  
+
   // UPDATE THIS IP TO MATCH YOUR PC
-  final String serverUrl = "http://192.168.8.122:8000/register"; 
+  final String serverUrl = "http://192.168.8.122:8000/register";
 
   // --- HELPER: Parse Backend Errors Safely ---
   String _getBackendError(String responseBody) {
@@ -48,8 +48,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
   // --- LOGIC ---
   Future<void> _handleRegister() async {
     // 1. Basic Empty Check
-    if (_nameCtrl.text.trim().isEmpty || 
-        _contactCtrl.text.trim().isEmpty || 
+    if (_nameCtrl.text.trim().isEmpty ||
+        _contactCtrl.text.trim().isEmpty ||
         _secretCtrl.text.trim().isEmpty) {
       _showError("Please fill all fields");
       return;
@@ -65,7 +65,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         _showError("Phone number must contain only digits.");
         return;
       }
-      if (contactVal.length < 15) {
+      if (contactVal.length < 9) {
         _showError("Phone number is too short.");
         return;
       }
@@ -97,16 +97,18 @@ class _RegisterScreenState extends State<RegisterScreen> {
           "contact_type": _registerMethod.toLowerCase(),
           "contact_value": contactVal,
           "secret": secretVal,
-          "role": _selectedRole
+          "role": _selectedRole,
         }),
       );
 
       if (response.statusCode == 200) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text("Registered! Please Login."), 
-            backgroundColor: Colors.green
-          ));
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("Registered! Please Login."),
+              backgroundColor: Colors.green,
+            ),
+          );
           Navigator.pop(context);
         }
       } else {
@@ -122,9 +124,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   void _showError(String msg) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg), backgroundColor: Colors.red)
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.red));
   }
 
   @override
@@ -132,37 +134,49 @@ class _RegisterScreenState extends State<RegisterScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFF6F8F6),
       appBar: AppBar(
-        title: const Text("Create Account"), 
-        backgroundColor: Colors.transparent, 
-        elevation: 0, 
-        foregroundColor: Colors.black
+        title: const Text("Create Account"),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        foregroundColor: Colors.black,
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(24.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text("How do you want to login?", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            const Text(
+              "How do you want to login?",
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
             const SizedBox(height: 10),
-            
+
             // --- METHOD TOGGLE ---
             Row(
               children: [
-                Expanded(child: _buildMethodButton("Phone", Icons.phone_android)),
+                Expanded(
+                  child: _buildMethodButton("Phone", Icons.phone_android),
+                ),
                 const SizedBox(width: 12),
-                Expanded(child: _buildMethodButton("Email", Icons.email_outlined)),
+                Expanded(
+                  child: _buildMethodButton("Email", Icons.email_outlined),
+                ),
               ],
             ),
             const SizedBox(height: 24),
 
             // --- FORM ---
-            TextField(controller: _nameCtrl, decoration: _inputDecor("Full Name", Icons.person)),
+            TextField(
+              controller: _nameCtrl,
+              decoration: _inputDecor("Full Name", Icons.person),
+            ),
             const SizedBox(height: 16),
-            
+
             // Dynamic Contact Field
             TextField(
               controller: _contactCtrl,
-              keyboardType: _registerMethod == "Phone" ? TextInputType.phone : TextInputType.emailAddress,
+              keyboardType: _registerMethod == "Phone"
+                  ? TextInputType.phone
+                  : TextInputType.emailAddress,
               decoration: _inputDecor(
                 _registerMethod == "Phone" ? "Phone Number" : "Email Address",
                 _registerMethod == "Phone" ? Icons.phone : Icons.email,
@@ -173,11 +187,15 @@ class _RegisterScreenState extends State<RegisterScreen> {
             // Dynamic Secret Field
             TextField(
               controller: _secretCtrl,
-              keyboardType: _registerMethod == "Phone" ? TextInputType.number : TextInputType.text,
+              keyboardType: _registerMethod == "Phone"
+                  ? TextInputType.number
+                  : TextInputType.text,
               obscureText: true,
               maxLength: _registerMethod == "Phone" ? 4 : null,
               decoration: _inputDecor(
-                _registerMethod == "Phone" ? "Create 4-digit PIN" : "Create Password",
+                _registerMethod == "Phone"
+                    ? "Create 4-digit PIN"
+                    : "Create Password",
                 Icons.lock,
               ),
             ),
@@ -186,12 +204,17 @@ class _RegisterScreenState extends State<RegisterScreen> {
             // Role Dropdown
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12),
-              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8)),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(8),
+              ),
               child: DropdownButtonHideUnderline(
                 child: DropdownButton<String>(
                   value: _selectedRole,
                   isExpanded: true,
-                  items: _roles.map((r) => DropdownMenuItem(value: r, child: Text(r))).toList(),
+                  items: _roles
+                      .map((r) => DropdownMenuItem(value: r, child: Text(r)))
+                      .toList(),
                   onChanged: (val) => setState(() => _selectedRole = val!),
                 ),
               ),
@@ -199,17 +222,17 @@ class _RegisterScreenState extends State<RegisterScreen> {
             const SizedBox(height: 32),
 
             SizedBox(
-              width: double.infinity, 
+              width: double.infinity,
               height: 50,
               child: ElevatedButton(
                 onPressed: _isLoading ? null : _handleRegister,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF11D452), 
-                  foregroundColor: Colors.white
+                  backgroundColor: const Color(0xFF11D452),
+                  foregroundColor: Colors.white,
                 ),
-                child: _isLoading 
-                  ? const CircularProgressIndicator(color: Colors.white) 
-                  : const Text("Register"),
+                child: _isLoading
+                    ? const CircularProgressIndicator(color: Colors.white)
+                    : const Text("Register"),
               ),
             ),
           ],
@@ -233,14 +256,22 @@ class _RegisterScreenState extends State<RegisterScreen> {
         decoration: BoxDecoration(
           color: isSelected ? const Color(0xFF11D452) : Colors.white,
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: isSelected ? Colors.transparent : Colors.grey.shade300),
+          border: Border.all(
+            color: isSelected ? Colors.transparent : Colors.grey.shade300,
+          ),
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(icon, color: isSelected ? Colors.white : Colors.grey),
             const SizedBox(width: 8),
-            Text(method, style: TextStyle(color: isSelected ? Colors.white : Colors.black, fontWeight: FontWeight.bold)),
+            Text(
+              method,
+              style: TextStyle(
+                color: isSelected ? Colors.white : Colors.black,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
           ],
         ),
       ),
@@ -249,9 +280,15 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   InputDecoration _inputDecor(String hint, IconData icon) {
     return InputDecoration(
-      filled: true, fillColor: Colors.white, hintText: hint, prefixIcon: Icon(icon, color: Colors.grey),
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
-      counterText: "" 
+      filled: true,
+      fillColor: Colors.white,
+      hintText: hint,
+      prefixIcon: Icon(icon, color: Colors.grey),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(8),
+        borderSide: BorderSide.none,
+      ),
+      counterText: "",
     );
   }
 }

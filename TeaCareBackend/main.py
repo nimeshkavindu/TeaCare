@@ -135,6 +135,12 @@ class FeedbackRequest(BaseModel):
     is_correct: bool
     correct_disease: str = None
 
+class CommentRequest(BaseModel):
+    post_id: int
+    user_id: int
+    author_name: str
+    content: str
+
 # --- APP SETUP ---
 app = FastAPI()
 os.makedirs("uploads", exist_ok=True)
@@ -225,11 +231,10 @@ async def predict_disease(
             print(f"Low confidence detection ({confidence:.2f}%) for user {user_id}")
 
         else:
-            # Only run DB logic if confidence is >= 50%
             db_disease_name = re.sub(r'^\d+\.\s*', '', disease_name).strip() 
-            
+            disease_name = db_disease_name
             # 6. FETCH DYNAMIC DATA FROM DB
-            disease_info = db.query(DiseaseInfo).filter(DiseaseInfo.name.ilike(db_disease_name)).first()
+            disease_info = db.query(DiseaseInfo).filter(DiseaseInfo.name.ilike(disease_name)).first()
             
             if disease_info:
                 symptoms = disease_info.symptoms
@@ -260,7 +265,7 @@ async def predict_disease(
         )
         db.add(new_report)
         db.commit()
-        db.refresh(new_report) # Needed to get the new 'report_id'
+        db.refresh(new_report) 
         
         # -----------------------------------
 
@@ -348,3 +353,64 @@ def get_weather_alert():
         "condition": "Rainy", "risk_level": "High", "disease_forecast": "Blister Blight",
         "advice": "High humidity detected. Avoid plucking wet leaves."
     }
+
+# --- COMMUNITY FORUM ENDPOINTS ---
+
+@app.post("/posts")
+def create_post(
+    user_id: int = Form(...),
+    author_name: str = Form(...),
+    title: str = Form(...),
+    content: str = Form(...),
+    file: UploadFile = File(None), 
+    db: Session = Depends(get_db)
+):
+    image_path = None
+    if file:
+        file_location = f"uploads/{file.filename}"
+        with open(file_location, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        image_path = file_location
+
+    new_post = ForumPost(
+        user_id=user_id,
+        author_name=author_name,
+        title=title,
+        content=content,
+        image_url=image_path, 
+        timestamp=datetime.now().strftime("%Y-%m-%d %H:%M")
+    )
+    db.add(new_post)
+    db.commit()
+    return {"message": "Post created successfully"}
+
+@app.get("/posts")
+def get_posts(db: Session = Depends(get_db)):
+    posts = db.query(ForumPost).order_by(ForumPost.post_id.desc()).all()
+    return posts
+
+@app.post("/posts/{post_id}/like")
+def like_post(post_id: int, db: Session = Depends(get_db)):
+    post = db.query(ForumPost).filter(ForumPost.post_id == post_id).first()
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+    post.likes += 1
+    db.commit()
+    return {"likes": post.likes}
+
+@app.post("/comments")
+def add_comment(request: CommentRequest, db: Session = Depends(get_db)):
+    new_comment = ForumComment(
+        post_id=request.post_id,
+        user_id=request.user_id,
+        author_name=request.author_name,
+        content=request.content,
+        timestamp=datetime.now().strftime("%Y-%m-%d %H:%M")
+    )
+    db.add(new_comment)
+    db.commit()
+    return {"message": "Comment added"}
+
+@app.get("/posts/{post_id}/comments")
+def get_comments(post_id: int, db: Session = Depends(get_db)):
+    return db.query(ForumComment).filter(ForumComment.post_id == post_id).all()
