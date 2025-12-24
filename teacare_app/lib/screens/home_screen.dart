@@ -22,7 +22,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final ImagePicker _picker = ImagePicker();
   bool _isUploading = false; // Controls the "Analyzing" screen
   List<dynamic> _history = [];
-  
+
   // Ensure this IP matches your setup
   final String serverUrl = "http://192.168.8.122:8000/predict";
 
@@ -65,7 +65,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 },
               ),
               ListTile(
-                leading: const Icon(Icons.photo_library, color: Color(0xFF15803D)),
+                leading: const Icon(
+                  Icons.photo_library,
+                  color: Color(0xFF15803D),
+                ),
                 title: const Text('Choose from Gallery'),
                 onTap: () {
                   Navigator.pop(context);
@@ -120,8 +123,7 @@ class _HomeScreenState extends State<HomeScreen> {
         // Check if the backend sent a "soft error" (like Blurry Image)
         if (data.containsKey('error')) {
           _showError(data['error']); // Show "Image is too blurry"
-        } 
-        else {
+        } else {
           // Only navigate if we actually have data
           _fetchHistory();
 
@@ -130,19 +132,23 @@ class _HomeScreenState extends State<HomeScreen> {
               context,
               MaterialPageRoute(
                 builder: (context) => DiagnosisScreen(
-                  // Use '?? 0' to provide a fallback if report_id is missing (Safety)
-                  reportId: data['report_id'] ?? 0, 
+                  // Use '??' to provide fallbacks for safety
+                  reportId: data['report_id'] ?? 0,
                   diseaseName: data['disease_name'] ?? "Unknown",
                   confidence: data['confidence'] ?? "0%",
                   imagePath: photo.path,
-                  treatment: data['treatment'] ?? "No treatment info",
+                  // --- FIXES START HERE ---
+                  // Removed 'treatment' (singular)
+                  // Added 'causes' and 'treatments' (plural lists)
                   symptoms: data['symptoms'] ?? [],
+                  causes: data['causes'] ?? [],
+                  treatments: data['treatments'] ?? [],
+                  // --- FIXES END HERE ---
                 ),
               ),
             );
           }
         }
-        // --- FIX ENDS HERE ---
       } else {
         // Handle Server Error (500, 404, etc)
         _showError("Server Error: ${response.statusCode}");
@@ -154,6 +160,7 @@ class _HomeScreenState extends State<HomeScreen> {
       if (mounted) setState(() => _isUploading = false);
     }
   }
+
   void _showError(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -165,9 +172,9 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final List<Widget> pages = [
       _buildHomeDashboard(),
-      const SizedBox(), 
+      const SizedBox(),
       CommunityScreen(userId: widget.userId, userName: widget.userName),
-      const HeatMapScreen(), 
+      const HeatMapScreen(),
     ];
 
     return Scaffold(
@@ -199,7 +206,10 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.notifications_outlined, color: Color(0xFF6B7280)),
+            icon: const Icon(
+              Icons.notifications_outlined,
+              color: Color(0xFF6B7280),
+            ),
             onPressed: () {},
           ),
           Padding(
@@ -209,7 +219,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (context) => ProfileScreen(userName: widget.userName),
+                    builder: (context) =>
+                        ProfileScreen(userName: widget.userName),
                   ),
                 );
               },
@@ -254,7 +265,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      "Please wait while AI detects issues",
+                      "Please wait while AI detects symptoms",
                       style: TextStyle(
                         color: Colors.white.withOpacity(0.8),
                         fontSize: 14,
@@ -353,7 +364,11 @@ class _HomeScreenState extends State<HomeScreen> {
                       color: Colors.white.withOpacity(0.2),
                       shape: BoxShape.circle,
                     ),
-                    child: const Icon(Icons.camera_enhance, color: Colors.white, size: 32),
+                    child: const Icon(
+                      Icons.camera_enhance,
+                      color: Colors.white,
+                      size: 32,
+                    ),
                   ),
                   const SizedBox(width: 16),
                   const Column(
@@ -369,10 +384,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                       Text(
                         "Tap to scan a leaf",
-                        style: TextStyle(
-                          color: Colors.white70,
-                          fontSize: 14,
-                        ),
+                        style: TextStyle(color: Colors.white70, fontSize: 14),
                       ),
                     ],
                   ),
@@ -385,7 +397,11 @@ class _HomeScreenState extends State<HomeScreen> {
           // --- QUICK ACTIONS GRID ---
           const Text(
             "Quick Actions",
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1F2937)),
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF1F2937),
+            ),
           ),
           const SizedBox(height: 16),
           GridView.count(
@@ -397,31 +413,36 @@ class _HomeScreenState extends State<HomeScreen> {
             childAspectRatio: 1.5,
             children: [
               _buildQuickAction(
-                Icons.cloud_outlined, 
-                Colors.blue,          
+                Icons.cloud_outlined,
+                Colors.blue,
                 "Weather",
                 "Rain & Forecast",
                 () {
                   Navigator.push(
                     context,
-                    MaterialPageRoute(builder: (context) => const WeatherScreen()),
+                    MaterialPageRoute(
+                      builder: (context) => const WeatherScreen(),
+                    ),
                   );
                 },
               ),
-              
+
               _buildQuickAction(
                 Icons.history_edu,
-                Colors.orange, 
+                Colors.orange,
                 "Reports",
                 "Past scans",
                 () {
                   Navigator.push(
                     context,
-                    MaterialPageRoute(builder: (context) => HistoryScreen(userId: widget.userId)),
+                    MaterialPageRoute(
+                      builder: (context) =>
+                          HistoryScreen(userId: widget.userId),
+                    ),
                   );
                 },
               ),
-              
+
               _buildQuickAction(
                 Icons.support_agent,
                 Colors.purple,
@@ -429,7 +450,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 "Chat with pros",
                 () {},
               ),
-              
+
               _buildQuickAction(
                 Icons.monetization_on_outlined,
                 Colors.green,
@@ -447,66 +468,83 @@ class _HomeScreenState extends State<HomeScreen> {
             children: [
               const Text(
                 "Recent Scans",
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1F2937)),
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF1F2937),
+                ),
               ),
               TextButton(
                 onPressed: () {
-                   Navigator.push(
+                  Navigator.push(
                     context,
-                    MaterialPageRoute(builder: (context) => HistoryScreen(userId: widget.userId)),
+                    MaterialPageRoute(
+                      builder: (context) =>
+                          HistoryScreen(userId: widget.userId),
+                    ),
                   );
                 },
                 child: const Text("View All"),
-              )
+              ),
             ],
           ),
           const SizedBox(height: 8),
-          
+
           _history.isEmpty
-            ? Container(
-                padding: const EdgeInsets.all(20),
-                width: double.infinity,
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: const Center(child: Text("No scans yet. Start by scanning a leaf!")),
-              )
-            : Column(
-                children: _history.take(3).map((report) {
-                  return Card(
-                    margin: const EdgeInsets.only(bottom: 12),
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      side: BorderSide(color: Colors.grey.shade200),
-                    ),
-                    child: ListTile(
-                      leading: CircleAvatar(
-                        backgroundColor: report['disease_name'] == "Healthy Leaf" 
-                            ? const Color(0xFFDCFCE7) 
-                            : const Color(0xFFFEE2E2),
-                        child: Icon(
-                          Icons.spa, 
-                          color: report['disease_name'] == "Healthy Leaf" 
-                              ? const Color(0xFF15803D) 
-                              : Colors.red,
-                          size: 20,
+              ? Container(
+                  padding: const EdgeInsets.all(20),
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Center(
+                    child: Text("No scans yet. Start by scanning a leaf!"),
+                  ),
+                )
+              : Column(
+                  children: _history.take(3).map((report) {
+                    return Card(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        side: BorderSide(color: Colors.grey.shade200),
+                      ),
+                      child: ListTile(
+                        leading: CircleAvatar(
+                          backgroundColor:
+                              report['disease_name'] == "Healthy Leaf"
+                              ? const Color(0xFFDCFCE7)
+                              : const Color(0xFFFEE2E2),
+                          child: Icon(
+                            Icons.spa,
+                            color: report['disease_name'] == "Healthy Leaf"
+                                ? const Color(0xFF15803D)
+                                : Colors.red,
+                            size: 20,
+                          ),
+                        ),
+                        title: Text(
+                          report['disease_name'],
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          ),
+                        ),
+                        subtitle: Text(
+                          report['timestamp'],
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                        trailing: const Icon(
+                          Icons.arrow_forward_ios,
+                          size: 14,
+                          color: Colors.grey,
                         ),
                       ),
-                      title: Text(
-                        report['disease_name'], 
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)
-                      ),
-                      subtitle: Text(
-                        report['timestamp'],
-                        style: const TextStyle(fontSize: 12),
-                      ),
-                      trailing: const Icon(Icons.arrow_forward_ios, size: 14, color: Colors.grey),
-                    ),
-                  );
-                }).toList(),
-              ),
+                    );
+                  }).toList(),
+                ),
         ],
       ),
     );
@@ -547,7 +585,10 @@ class _HomeScreenState extends State<HomeScreen> {
               children: [
                 Text(
                   title,
-                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13,
+                  ),
                 ),
                 Text(
                   subtitle,

@@ -3,6 +3,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, validator
 from sqlalchemy import create_engine, Column, Integer, String, Float, or_
 from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import sessionmaker, Session
 from passlib.context import CryptContext
 import shutil
@@ -49,11 +50,9 @@ class DiseaseReport(Base):
     confidence = Column(String)
     image_url = Column(String)
     timestamp = Column(String)
-    # NEW: Location Support
     latitude = Column(Float, nullable=True)
     longitude = Column(Float, nullable=True)
-    # NEW: Feedback Support
-    is_correct = Column(String, default="Unknown") # "Yes", "No"
+    is_correct = Column(String, default="Unknown") 
     user_correction = Column(String, nullable=True)
 
 class ForumPost(Base):
@@ -75,6 +74,22 @@ class ForumComment(Base):
     author_name = Column(String)
     content = Column(String)
     timestamp = Column(String)
+
+class DiseaseInfo(Base):
+    __tablename__ = "diseases"
+    disease_id = Column(Integer, primary_key=True)
+    name = Column(String)
+    symptoms = Column(postgresql.ARRAY(String)) 
+    causes = Column(postgresql.ARRAY(String))
+
+class Treatment(Base):
+    __tablename__ = "treatments"
+    treatment_id = Column(Integer, primary_key=True)
+    disease_id = Column(Integer)
+    type = Column(String)
+    title = Column(String)
+    instruction = Column(String)
+    safety_tip = Column(String)
 
 Base.metadata.create_all(bind=engine)
 
@@ -169,9 +184,8 @@ async def predict_disease(
         # 1. Read Content
         contents = await file.read()
         
-        # 2. Check for Blur (Professional Quality Control)
+        # 2. Check for Blur
         if is_blurry(contents):
-             # We return a 200 OK but with a specific error message so the app handles it gracefully
             return {
                 "error": "Image is too blurry. Please hold the camera steady and try again.",
                 "blur_score": "Low"
@@ -182,50 +196,51 @@ async def predict_disease(
         with open(file_location, "wb") as buffer:
             buffer.write(contents)
 
-        # 4. Prepare Images for TTA (Test Time Augmentation)
-        # We create a batch of 3 images: Original, Rotated, Flipped
+        # 4. TTA (Test Time Augmentation)
         image = Image.open(io.BytesIO(contents)).convert('RGB')
         image = image.resize((224, 224))
         
         img_orig = np.asarray(image)
-        img_rot = np.asarray(image.rotate(90)) # Rotate 90
-        img_flip = np.asarray(ImageOps.mirror(image)) # Horizontal Flip
+        img_rot = np.asarray(image.rotate(90))
+        img_flip = np.asarray(ImageOps.mirror(image))
 
-        # Create batch: Shape (3, 224, 224, 3)
         batch = np.array([img_orig, img_rot, img_flip])
 
-        # 5. Predict on Batch
+        # 5. Predict
         predictions = model.predict(batch)
-        
-        # Average the scores (TTA Logic)
         avg_score = np.mean(predictions, axis=0)
         final_score = tf.nn.softmax(avg_score)
 
         class_idx = np.argmax(final_score)
-        disease_name = class_names[class_idx]
+        disease_name = class_names[class_idx] 
         confidence = float(np.max(final_score)) * 100
-        
-        # 6. Treatments & Logic
-        treatments = {
-            "Red Spider": "Spray sulfur-based miticides and maintain humidity.",
-            "Brown Blight": "Improve drainage and apply copper fungicides.",
-            "Gray Blight": "Prune infected areas and apply carbendazim.",
-            "Tea Algal Leaf Spot": "Improve air circulation and reduce shade.",
-            "Helopeltis": "Apply systemic insecticides early morning.",
-            "Healthy Leaf": "Keep up the good work! Maintain regular watering."
-        }
-        
-        symptoms = ["Visual discoloration", "Texture change"]
 
-        # Confidence Threshold
-        if confidence < 50.0:
-            disease_name = "Unknown"
-            treatment = "Image unclear or disease not recognized."
-            symptoms = []
+        db_disease_name = re.sub(r'^\d+\.\s*', '', disease_name).strip() 
+        
+        # 6. FETCH DYNAMIC DATA FROM DB (Using the clean name)
+        disease_info = db.query(DiseaseInfo).filter(DiseaseInfo.name.ilike(db_disease_name)).first()
+        
+        if disease_info:
+            symptoms = disease_info.symptoms
+            causes = disease_info.causes
+            
+            treatments_db = db.query(Treatment).filter(Treatment.disease_id == disease_info.disease_id).all()
+            treatment_list = [
+                {
+                    "type": t.type,
+                    "title": t.title,
+                    "instruction": t.instruction,
+                    "safety_tip": t.safety_tip
+                } for t in treatments_db
+            ]
         else:
-            treatment = treatments.get(disease_name, "Consult an agricultural expert.")
+            symptoms = ["Leaf appears healthy"] if disease_name == "Healthy Leaf" else []
+            causes = []
+            treatment_list = []
 
-        # 7. Save Report
+        # --- MISSING PART RESTORED BELOW ---
+        
+        # 7. Save Report to Database
         new_report = DiseaseReport(
             user_id=user_id,
             disease_name=disease_name,
@@ -235,14 +250,17 @@ async def predict_disease(
         )
         db.add(new_report)
         db.commit()
-        db.refresh(new_report) # Get the ID back
+        db.refresh(new_report) # Needed to get the new 'report_id'
         
+        # -----------------------------------
+
         return {
-            "report_id": new_report.report_id, # Need this for location saving later
+            "report_id": new_report.report_id,
             "disease_name": disease_name,
             "confidence": f"{confidence:.2f}%",
-            "treatment": treatment,
             "symptoms": symptoms,
+            "causes": causes,
+            "treatments": treatment_list,
             "image_url": file_location
         }
 
