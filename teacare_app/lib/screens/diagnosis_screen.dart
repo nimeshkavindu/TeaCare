@@ -3,6 +3,8 @@ import 'dart:io';
 import 'treatment_screen.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'package:latlong2/latlong.dart'; 
+import 'location_picker_screen.dart';
 
 class DiagnosisScreen extends StatefulWidget {
   final int reportId;
@@ -32,9 +34,15 @@ class _DiagnosisScreenState extends State<DiagnosisScreen> {
   // Update with your IP
   final String baseUrl = "http://192.168.8.122:8000";
 
-  // --- LOGIC FUNCTIONS (Unchanged) ---
-  void _markLocation() {
-    _sendLocation(6.9271, 79.8612);
+  void _markLocation() async {
+    final LatLng? result = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const LocationPickerScreen()),
+    );
+
+    if (result != null) {
+      _sendLocation(result.latitude, result.longitude);
+    }
   }
 
   Future<void> _sendLocation(double lat, double lng) async {

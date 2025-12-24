@@ -295,6 +295,13 @@ def update_location(report_id: int, loc: LocationUpdate, db: Session = Depends(g
     db.commit()
     return {"message": "Location saved"}
 
+# --- PUBLIC MAP ENDPOINT ---
+@app.get("/reports/locations")
+def get_public_reports(db: Session = Depends(get_db)):
+    # Return all reports that have a location saved
+    reports = db.query(DiseaseReport).filter(DiseaseReport.latitude != None).all()
+    return reports
+
 # --- NEW: SUBMIT FEEDBACK (Active Learning) ---
 @app.post("/history/{report_id}/feedback")
 def submit_feedback(report_id: int, feedback: FeedbackRequest, db: Session = Depends(get_db)):

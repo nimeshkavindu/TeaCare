@@ -337,7 +337,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      "Please wait while AI detects issues",
+                      "Please wait while AI detects symptoms",
                       style: TextStyle(
                         color: Colors.white.withOpacity(0.8),
                         fontSize: 14,
