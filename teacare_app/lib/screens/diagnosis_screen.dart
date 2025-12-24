@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'dart:io';
-import 'treatment_screen.dart'; // We will create this next
+import 'treatment_screen.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 
 class DiagnosisScreen extends StatefulWidget {
   final int reportId;
@@ -8,8 +10,8 @@ class DiagnosisScreen extends StatefulWidget {
   final String confidence;
   final String imagePath;
   final List<dynamic> symptoms;
-  final List<dynamic> causes; // Received from backend
-  final List<dynamic> treatments; // Received from backend
+  final List<dynamic> causes;
+  final List<dynamic> treatments;
 
   const DiagnosisScreen({
     super.key,
@@ -27,117 +29,258 @@ class DiagnosisScreen extends StatefulWidget {
 }
 
 class _DiagnosisScreenState extends State<DiagnosisScreen> {
-  // ... (Keep your existing _markLocation and _reportIncorrect functions here) ...
+  // Update with your IP
+  final String baseUrl = "http://192.168.8.122:8000";
 
+  // --- LOGIC FUNCTIONS (Unchanged) ---
+  void _markLocation() {
+    _sendLocation(6.9271, 79.8612);
+  }
+
+  Future<void> _sendLocation(double lat, double lng) async {
+    try {
+      await http.patch(
+        Uri.parse("$baseUrl/history/${widget.reportId}/location"),
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({"latitude": lat, "longitude": lng}),
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Location Saved!"),
+            backgroundColor: Color.fromARGB(255, 76, 175, 80),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Failed to save location"),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  void _reportIncorrect() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Help us improve"),
+        content: const Text("What is the correct disease?"),
+        actions: [
+          TextButton(
+            child: const Text("Cancel"),
+            onPressed: () => Navigator.pop(context),
+          ),
+          TextButton(
+            child: const Text("Submit"),
+            onPressed: () => _sendFeedback("Corrected by User"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _sendFeedback(String correctDisease) async {
+    Navigator.pop(context);
+    try {
+      await http.post(
+        Uri.parse("$baseUrl/history/${widget.reportId}/feedback"),
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({
+          "is_correct": false,
+          "correct_disease": correctDisease,
+        }),
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Feedback Sent!"),
+            backgroundColor: Colors.blue,
+          ),
+        );
+      }
+    } catch (e) {
+      print(e);
+    }
+  }
+
+  // --- UI BUILDER ---
   @override
   Widget build(BuildContext context) {
-    // Check if healthy to change colors
+    // 1. Determine Status Colors
     bool isHealthy = widget.diseaseName.toLowerCase().contains("healthy");
-    Color statusColor = isHealthy ? Colors.green : Colors.red;
+
+    // Healthy = Green Theme, Disease = Red Theme
+    Color statusColor = isHealthy
+        ? Colors.green
+        : const Color(0xFFD32F2F); // Red
+    Color statusBg = isHealthy
+        ? const Color(0xFFE8F5E9)
+        : const Color(0xFFFFEBEE); // Light Red
+    IconData statusIcon = isHealthy
+        ? Icons.check_circle
+        : Icons.warning_amber_rounded;
 
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: const Color(0xFFF3F4F6), // Light Gray Background
       appBar: AppBar(
-        title: const Text("TeaCare", style: TextStyle(color: Colors.white)),
-        backgroundColor: const Color(0xFF3B5E3C), // Dark Green Header
-        iconTheme: const IconThemeData(color: Colors.white),
+        backgroundColor: const Color(0xFF4E7C46), // Dark Green Header
         elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.eco, color: Colors.white),
+            SizedBox(width: 8),
+            Text(
+              "TeaCare",
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.share, color: Colors.white),
+            onPressed: () {},
+          ),
+        ],
       ),
       body: SingleChildScrollView(
         child: Column(
           children: [
-            // 1. HEADER SECTION
+            // --- HEADER ALERT CARD ---
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.only(bottom: 20, left: 20, right: 20),
-              decoration: const BoxDecoration(
-                color: Color(0xFF3B5E3C),
-                borderRadius: BorderRadius.only(
-                  bottomLeft: Radius.circular(30),
-                  bottomRight: Radius.circular(30),
+              color: const Color(0xFF4E7C46), // Match Header
+              padding: const EdgeInsets.only(bottom: 24),
+              child: Container(
+                margin: const EdgeInsets.symmetric(horizontal: 20),
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.1),
+                      blurRadius: 10,
+                      offset: const Offset(0, 5),
+                    ),
+                  ],
                 ),
-              ),
-              child: Column(
-                children: [
-                  CircleAvatar(
-                    backgroundColor: Colors.white.withOpacity(0.2),
-                    radius: 30,
-                    child: Icon(
-                      isHealthy ? Icons.check : Icons.warning_amber_rounded,
-                      color: statusColor,
-                      size: 30,
+                child: Column(
+                  children: [
+                    // Icon Bubble
+                    Container(
+                      width: 50,
+                      height: 50,
+                      decoration: BoxDecoration(
+                        color: statusBg,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(statusIcon, color: statusColor, size: 28),
                     ),
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    isHealthy ? "Healthy Leaf" : "Disease Detected",
-                    style: const TextStyle(color: Colors.white70, fontSize: 16),
-                  ),
-                  const SizedBox(height: 5),
-                  Text(
-                    widget.diseaseName,
-                    style: TextStyle(
-                      color: isHealthy
-                          ? Colors.greenAccent
-                          : const Color(0xFFFF5252),
-                      fontSize: 28,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.9),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Text(
-                      "${widget.confidence} Confidence",
+                    const SizedBox(height: 12),
+                    Text(
+                      isHealthy ? "Healthy Plant" : "Disease Detected",
                       style: const TextStyle(
-                        color: Colors.black87,
+                        fontSize: 14,
                         fontWeight: FontWeight.bold,
+                        color: Colors.black87,
                       ),
                     ),
-                  ),
-                ],
+                    const SizedBox(height: 4),
+                    Text(
+                      widget.diseaseName,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.w900,
+                        color: statusColor,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    // Confidence Pill
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(
+                          0xFFE8F5E9,
+                        ), // Always light green for confidence
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            Icons.check_circle,
+                            size: 16,
+                            color: Color(0xFF2E7D32),
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            "${widget.confidence} Confidence",
+                            style: const TextStyle(
+                              color: Color(0xFF2E7D32),
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
 
             Padding(
-              padding: const EdgeInsets.all(20.0),
+              padding: const EdgeInsets.all(20),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // 2. SCANNED IMAGE
+                  // --- SCANNED IMAGE ---
                   Stack(
                     children: [
                       ClipRRect(
-                        borderRadius: BorderRadius.circular(15),
+                        borderRadius: BorderRadius.circular(20),
                         child: Image.file(
                           File(widget.imagePath),
                           width: double.infinity,
-                          height: 200,
+                          height: 220,
                           fit: BoxFit.cover,
                         ),
                       ),
                       Positioned(
-                        top: 10,
-                        right: 10,
+                        top: 12,
+                        right: 12,
                         child: Container(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 10,
-                            vertical: 4,
+                            vertical: 5,
                           ),
                           decoration: BoxDecoration(
-                            color: Colors.black54,
-                            borderRadius: BorderRadius.circular(10),
+                            color: Colors.black.withOpacity(0.6),
+                            borderRadius: BorderRadius.circular(20),
                           ),
                           child: const Text(
                             "Scanned Image",
-                            style: TextStyle(color: Colors.white, fontSize: 12),
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
                         ),
                       ),
@@ -145,35 +288,36 @@ class _DiagnosisScreenState extends State<DiagnosisScreen> {
                   ),
                   const SizedBox(height: 20),
 
-                  // 3. SYMPTOMS CARD
+                  // --- SYMPTOMS CARD ---
                   if (widget.symptoms.isNotEmpty)
                     _buildInfoCard(
                       "Symptoms",
-                      Icons.remove_red_eye,
+                      Icons.visibility,
                       Colors.orange.shade100,
-                      Colors.orange.shade900,
+                      const Color(0xFFFF9800),
                       widget.symptoms,
                     ),
+                  const SizedBox(height: 16),
 
-                  const SizedBox(height: 15),
-
-                  // 4. CAUSES CARD
+                  // --- CAUSES CARD ---
                   if (widget.causes.isNotEmpty)
                     _buildInfoCard(
                       "Causes",
                       Icons.search,
-                      Colors.blue.shade50,
-                      Colors.blue.shade900,
+                      Colors.blue.shade100,
+                      const Color(0xFF2196F3),
                       widget.causes,
                     ),
 
-                  const SizedBox(height: 25),
+                  const SizedBox(height: 24),
 
-                  // 5. TREATMENT BUTTON
+                  // --- ACTION BUTTONS ---
+
+                  // 1. Treatment (Primary)
                   if (!isHealthy)
                     SizedBox(
                       width: double.infinity,
-                      height: 55,
+                      height: 56,
                       child: ElevatedButton(
                         onPressed: () {
                           Navigator.push(
@@ -187,26 +331,24 @@ class _DiagnosisScreenState extends State<DiagnosisScreen> {
                           );
                         },
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(
-                            0xFF437649,
-                          ), // Nice Forest Green
+                          backgroundColor: const Color(0xFF4E7C46), // Green
                           shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
+                            borderRadius: BorderRadius.circular(16),
                           ),
                           elevation: 4,
+                          shadowColor: const Color(0xFF4E7C46).withOpacity(0.4),
                         ),
                         child: const Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
                             Text(
                               "Treatment Recommendation",
                               style: TextStyle(
-                                fontSize: 18,
-                                color: Colors.white,
+                                fontSize: 16,
                                 fontWeight: FontWeight.bold,
+                                color: Colors.white,
                               ),
                             ),
-                            SizedBox(width: 8),
                             Icon(
                               Icons.arrow_forward_ios,
                               color: Colors.white,
@@ -216,31 +358,58 @@ class _DiagnosisScreenState extends State<DiagnosisScreen> {
                         ),
                       ),
                     ),
+                  const SizedBox(height: 12),
 
-                  const SizedBox(height: 20),
-
-                  // 6. ACTION BUTTONS (Save & Wrong)
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _buildActionButton(
-                          "Save Location",
-                          Icons.location_on,
-                          Colors.blue,
-                          () {},
+                  // 2. Save Location (Secondary)
+                  SizedBox(
+                    width: double.infinity,
+                    height: 56,
+                    child: ElevatedButton(
+                      onPressed: _markLocation,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.white,
+                        foregroundColor: Colors.black87,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          side: BorderSide(color: Colors.grey.shade300),
                         ),
-                      ), // Call _markLocation
-                      const SizedBox(width: 15),
-                      Expanded(
-                        child: _buildActionButton(
-                          "Wrong Diagnosis?",
-                          Icons.flag,
-                          Colors.grey,
-                          () {},
-                        ),
-                      ), // Call _reportIncorrect
-                    ],
+                        elevation: 0,
+                      ),
+                      child: const Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.location_on,
+                            color: Color(0xFF4E7C46),
+                          ), // Green Icon
+                          SizedBox(width: 8),
+                          Text(
+                            "Save Location",
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
+                  const SizedBox(height: 16),
+
+                  // 3. Feedback Link
+                  GestureDetector(
+                    onTap: _reportIncorrect,
+                    child: const Text(
+                      "Wrong diagnosis? Give feedback",
+                      style: TextStyle(
+                        color: Colors.grey,
+                        decoration: TextDecoration.underline,
+                        decorationStyle: TextDecorationStyle.dotted,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
                 ],
               ),
             ),
@@ -250,6 +419,7 @@ class _DiagnosisScreenState extends State<DiagnosisScreen> {
     );
   }
 
+  // --- HELPER: Info Card Builder (Updated Design) ---
   Widget _buildInfoCard(
     String title,
     IconData icon,
@@ -258,16 +428,15 @@ class _DiagnosisScreenState extends State<DiagnosisScreen> {
     List<dynamic> items,
   ) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey.shade200),
+        borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.shade100,
-            blurRadius: 5,
-            offset: const Offset(0, 3),
+            color: Colors.black.withOpacity(0.03),
+            blurRadius: 15,
+            offset: const Offset(0, 5),
           ),
         ],
       ),
@@ -277,38 +446,44 @@ class _DiagnosisScreenState extends State<DiagnosisScreen> {
           Row(
             children: [
               Container(
-                padding: const EdgeInsets.all(6),
+                width: 40,
+                height: 40,
                 decoration: BoxDecoration(
-                  color: bgCol,
-                  borderRadius: BorderRadius.circular(8),
+                  color: bgCol.withOpacity(0.5),
+                  borderRadius: BorderRadius.circular(10),
                 ),
-                child: Icon(icon, color: iconCol, size: 20),
+                child: Icon(icon, color: iconCol, size: 22),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 12),
               Text(
                 title,
                 style: const TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
+                  color: Colors.black87,
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 16),
           ...items.map(
             (item) => Padding(
-              padding: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.only(bottom: 10),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(Icons.circle, size: 8, color: iconCol),
-                  const SizedBox(width: 8),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Icon(Icons.circle, size: 8, color: iconCol),
+                  ),
+                  const SizedBox(width: 12),
                   Expanded(
                     child: Text(
                       item.toString(),
                       style: const TextStyle(
-                        color: Colors.black87,
-                        height: 1.4,
+                        color: Colors.black54,
+                        height: 1.5,
+                        fontSize: 14,
                       ),
                     ),
                   ),
@@ -317,24 +492,6 @@ class _DiagnosisScreenState extends State<DiagnosisScreen> {
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildActionButton(
-    String label,
-    IconData icon,
-    Color color,
-    VoidCallback onTap,
-  ) {
-    return OutlinedButton.icon(
-      onPressed: onTap,
-      icon: Icon(icon, color: color, size: 20),
-      label: Text(label, style: TextStyle(color: color)),
-      style: OutlinedButton.styleFrom(
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        side: BorderSide(color: color.withOpacity(0.5)),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
     );
   }

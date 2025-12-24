@@ -214,31 +214,41 @@ async def predict_disease(
         class_idx = np.argmax(final_score)
         disease_name = class_names[class_idx] 
         confidence = float(np.max(final_score)) * 100
-
-        db_disease_name = re.sub(r'^\d+\.\s*', '', disease_name).strip() 
         
-        # 6. FETCH DYNAMIC DATA FROM DB (Using the clean name)
-        disease_info = db.query(DiseaseInfo).filter(DiseaseInfo.name.ilike(db_disease_name)).first()
-        
-        if disease_info:
-            symptoms = disease_info.symptoms
-            causes = disease_info.causes
-            
-            treatments_db = db.query(Treatment).filter(Treatment.disease_id == disease_info.disease_id).all()
-            treatment_list = [
-                {
-                    "type": t.type,
-                    "title": t.title,
-                    "instruction": t.instruction,
-                    "safety_tip": t.safety_tip
-                } for t in treatments_db
-            ]
-        else:
-            symptoms = ["Leaf appears healthy"] if disease_name == "Healthy Leaf" else []
-            causes = []
+        # Check if confidence is too low (less than 50%)
+        if confidence < 50:
+            disease_name = "Unknown / Unclear"
+            symptoms = ["The AI is not sure. The image might be unclear, or this disease is not in our database."]
+            causes = ["Low image quality", "Unrecognized pattern"]
             treatment_list = []
+            
+            print(f"Low confidence detection ({confidence:.2f}%) for user {user_id}")
 
-        # --- MISSING PART RESTORED BELOW ---
+        else:
+            # Only run DB logic if confidence is >= 50%
+            db_disease_name = re.sub(r'^\d+\.\s*', '', disease_name).strip() 
+            
+            # 6. FETCH DYNAMIC DATA FROM DB
+            disease_info = db.query(DiseaseInfo).filter(DiseaseInfo.name.ilike(db_disease_name)).first()
+            
+            if disease_info:
+                symptoms = disease_info.symptoms
+                causes = disease_info.causes
+                
+                treatments_db = db.query(Treatment).filter(Treatment.disease_id == disease_info.disease_id).all()
+                treatment_list = [
+                    {
+                        "type": t.type,
+                        "title": t.title,
+                        "instruction": t.instruction,
+                        "safety_tip": t.safety_tip
+                    } for t in treatments_db
+                ]
+            else:
+                symptoms = ["Leaf appears healthy"] if "Healthy" in disease_name else ["No details available for this disease."]
+                causes = []
+                treatment_list = []
+
         
         # 7. Save Report to Database
         new_report = DiseaseReport(
