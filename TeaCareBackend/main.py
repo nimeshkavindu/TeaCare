@@ -16,6 +16,7 @@ from datetime import datetime
 import pickle
 import cv2 
 import re 
+import httpx
 
 # --- DATABASE CONFIG ---
 SQLALCHEMY_DATABASE_URL = "postgresql://postgres:admin123@localhost/teacare_db"
@@ -353,13 +354,119 @@ def login(request: LoginRequest, db: Session = Depends(get_db)):
 def get_history(user_id: int, db: Session = Depends(get_db)):
     return db.query(DiseaseReport).filter(DiseaseReport.user_id == user_id).order_by(DiseaseReport.report_id.desc()).all()
 
+# --- WEATHER ENDPOINT ---
 @app.get("/weather")
-def get_weather_alert():
-    return {
-        "location": "Kandy, Sri Lanka", "temperature": 22, "humidity": 85, 
-        "condition": "Rainy", "risk_level": "High", "disease_forecast": "Blister Blight",
-        "advice": "High humidity detected. Avoid plucking wet leaves."
-    }
+async def get_weather_alert(lat: float = 6.9271, lng: float = 79.8612):
+    try:
+        # 1. Fetch Weather Data (Open-Meteo)
+        weather_url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lng}&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m,precipitation&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum&timezone=auto"
+        
+        # 1.5 Fetch Location Name (Nominatim Reverse Geocoding) - NEW!
+        # We assume the estate is in Sri Lanka, but this works globally.
+        geo_url = f"https://nominatim.openstreetmap.org/reverse?format=json&lat={lat}&lon={lng}"
+        
+        location_name = "Unknown Estate"
+        
+        async with httpx.AsyncClient() as client:
+            # Fetch Weather
+            weather_resp = await client.get(weather_url)
+            weather_data = weather_resp.json()
+            
+            # Fetch Location Name
+            # User-Agent is required by OpenStreetMap policies
+            try:
+                geo_resp = await client.get(geo_url, headers={"User-Agent": "TeaCareApp/1.0"})
+                if geo_resp.status_code == 200:
+                    geo_data = geo_resp.json()
+                    address = geo_data.get("address", {})
+                    
+                    # Try to get the most relevant name (City > Town > Village > State)
+                    city = address.get("city") or address.get("town") or address.get("village")
+                    state = address.get("state") or address.get("province")
+                    
+                    if city and state:
+                        location_name = f"{city}, {state}"
+                    elif city:
+                        location_name = city
+                    elif state:
+                        location_name = state
+            except Exception as e:
+                print(f"Geocoding Error: {e}")
+
+        # 2. Extract Weather Data
+        current = weather_data.get("current", {})
+        temp = current.get("temperature_2m", 0)
+        humidity = current.get("relative_humidity_2m", 0)
+        wind_speed = current.get("wind_speed_10m", 0)
+        rain = current.get("precipitation", 0)
+        code = current.get("weather_code", 0)
+
+        # 3. Interpret Weather Code
+        def get_condition(c):
+            if c in [0]: return "Sunny"
+            if c in [1, 2, 3]: return "Cloudy"
+            if c in [45, 48]: return "Foggy"
+            if c in [51, 53, 55, 61, 63, 65, 80, 81, 82]: return "Rainy"
+            if c >= 95: return "Storm"
+            return "Clear"
+
+        condition = get_condition(code)
+
+        # 4. Calculate Tea Risk
+        risk_level = "Low"
+        forecast_disease = "None"
+        advice = "Conditions are favorable for plantation work."
+
+        if humidity > 85 and condition in ["Rainy", "Cloudy"]:
+            risk_level = "High"
+            forecast_disease = "Blister Blight"
+            advice = "Critical risk! Pause plucking if leaves are wet."
+        elif temp > 30 and humidity < 60:
+            risk_level = "Medium"
+            forecast_disease = "Red Spider Mite"
+            advice = "Dry heat detected. Inspect for mites."
+
+        # 5. Spraying Advice
+        spraying_condition = "Safe"
+        if wind_speed > 20:
+            spraying_condition = "Unsafe (Windy)"
+        elif rain > 0.5 or condition == "Rainy":
+             spraying_condition = "Unsafe (Rain)"
+
+        # 6. Process Daily Forecast
+        daily = weather_data.get("daily", {})
+        forecast_list = []
+        if "time" in daily:
+            for i in range(len(daily["time"])):
+                forecast_list.append({
+                    "date": daily["time"][i],
+                    "max_temp": round(daily["temperature_2m_max"][i]),
+                    "min_temp": round(daily["temperature_2m_min"][i]),
+                    "rain_sum": daily["precipitation_sum"][i],
+                    "condition": get_condition(daily["weather_code"][i])
+                })
+
+        return {
+            "location": location_name, # <-- Now sends real name (e.g. "Kandy, Central Province")
+            "temperature": round(temp),
+            "humidity": humidity,
+            "wind_speed": wind_speed,
+            "condition": condition,
+            "risk_level": risk_level,
+            "disease_forecast": forecast_disease,
+            "advice": advice,
+            "spraying_condition": spraying_condition,
+            "daily_forecast": forecast_list
+        }
+
+    except Exception as e:
+        print(f"Weather Error: {e}")
+        return {
+            "location": "Offline", "temperature": 0, "humidity": 0,
+            "condition": "Error", "risk_level": "Unknown", 
+            "disease_forecast": "Unknown", "advice": "Check internet connection.",
+            "spraying_condition": "Unknown", "daily_forecast": []
+        }
 
 # --- COMMUNITY FORUM ENDPOINTS ---
 
