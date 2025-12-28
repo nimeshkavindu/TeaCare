@@ -1,0 +1,31 @@
+# --- System & IDEs ---
+.vscode/
+.idea/
+.DS_Store
+
+# --- Python Environment (Root) ---
+.venv/
+__pycache__/
+*.pyc
+
+# --- Backend Specifics (TeaCareBackend) ---
+# Ignore the heavy AI models folder
+TeaCareBackend/models/
+
+# Ignore uploaded user images
+TeaCareBackend/uploads/
+
+# Ignore large model files wherever they are (Safety net)
+*.gguf
+*.pt
+*.pth
+
+# (Optional) If you want to ignore the Keras model too, uncomment this:
+# *.keras
+
+# --- Flutter Specifics (teacare_app) ---
+teacare_app/build/
+teacare_app/.dart_tool/
+teacare_app/.flutter-plugins
+teacare_app/.flutter-plugins-dependencies
+teacare_app/.pub/

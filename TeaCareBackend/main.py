@@ -17,6 +17,8 @@ import pickle
 import cv2 
 import re 
 import httpx
+from llama_cpp import Llama
+from fastapi.responses import StreamingResponse
 
 # --- DATABASE CONFIG ---
 SQLALCHEMY_DATABASE_URL = "postgresql://postgres:admin123@localhost/teacare_db"
@@ -91,6 +93,14 @@ class Treatment(Base):
     title = Column(String)
     instruction = Column(String)
     safety_tip = Column(String)
+
+class TeaKnowledge(Base):
+    __tablename__ = "tea_knowledge"
+    id = Column(Integer, primary_key=True, index=True)
+    category = Column(String)  # e.g. "Fertilizer"
+    title = Column(String)     # e.g. "Urea Guidelines"
+    content = Column(String)   # The actual text paragraph
+    source = Column(String)    # e.g. "TRI Handbook Vol 1"
 
 Base.metadata.create_all(bind=engine)
 
@@ -447,7 +457,7 @@ async def get_weather_alert(lat: float = 6.9271, lng: float = 79.8612):
                 })
 
         return {
-            "location": location_name, # <-- Now sends real name (e.g. "Kandy, Central Province")
+            "location": location_name, 
             "temperature": round(temp),
             "humidity": humidity,
             "wind_speed": wind_speed,
@@ -528,3 +538,121 @@ def add_comment(request: CommentRequest, db: Session = Depends(get_db)):
 @app.get("/posts/{post_id}/comments")
 def get_comments(post_id: int, db: Session = Depends(get_db)):
     return db.query(ForumComment).filter(ForumComment.post_id == post_id).all()
+
+# --- AI ENGINE ---
+print("Loading LLM...")
+llm = Llama(
+    model_path="models/qwen2.5-1.5b-instruct-q4_k_m.gguf", 
+    n_ctx=2048,      # Context window 
+    n_threads=4,     # CPU threads to use
+    verbose=False
+)
+print("LLM is Ready!")
+
+# --- CHATBOT LOGIC ---
+
+# 1. Add Knowledge (Admin will use this later)
+class KnowledgeRequest(BaseModel):
+    category: str
+    title: str
+    content: str
+    source: str
+
+@app.post("/add_knowledge")
+def add_knowledge(item: KnowledgeRequest, db: Session = Depends(get_db)):
+    new_entry = TeaKnowledge(
+        category=item.category,
+        title=item.title,
+        content=item.content,
+        source=item.source
+    )
+    db.add(new_entry)
+    db.commit()
+    return {"message": "Knowledge added successfully"}
+
+# 2. Search Function (With Debug Logs)
+def retrieve_context(query: str, db: Session):
+    print(f"\n🔎 SEARCHING DATABASE FOR: '{query}'") # <--- NEW LOG
+
+    results = []
+    clean_query = query.replace("?", "").replace(".", "")
+    
+    # Search General Knowledge (Books)
+    knowledge = db.query(TeaKnowledge).filter(
+        or_(
+            TeaKnowledge.content.ilike(f"%{clean_query}%"),
+            TeaKnowledge.title.ilike(f"%{clean_query}%")
+        )
+    ).limit(3).all()
+    
+    for k in knowledge:
+        results.append(f"Fact: {k.content} (Source: {k.source})")
+
+    # --- NEW LOGGING LOGIC ---
+    if results:
+        print(f"✅ FOUND {len(results)} RECORDS:")
+        for i, res in enumerate(results):
+            print(f"   [{i+1}] {res[:100]}...") 
+    else:
+        print("❌ NO RECORDS FOUND.")
+    # -------------------------
+
+    if not results:
+        # Change this return string to enforce strictness
+        return "NO_DATA_FOUND" 
+    
+    return "\n\n".join(results)
+
+# 3. Chat Endpoint (The "Generation")
+@app.post("/chat_stream")
+async def chat_stream(
+    user_query: str = Form(...),
+    db: Session = Depends(get_db)
+):
+    # Step 1: Find relevant info
+    context = retrieve_context(user_query, db)
+
+    if context == "NO_DATA_FOUND":
+        system_instruction = (
+            "You are a Tea Assistant. "
+            "The user asked a question, but you have NO information about it in your database. "
+            "Politely apologize and say you only know about topics in the TeaCare database. "
+            "Do NOT make up an answer."
+        )
+    else:
+        system_instruction = (
+            "You are an expert Tea Agronomist for Sri Lanka. "
+            "Use the Context below to answer the farmer's question. "
+            "STRICT RULE: Answer ONLY using the facts provided in the Context. "
+            "If the Context does not contain the answer, say 'I do not have that specific information'. "
+        )
+    
+    # Step 2: Build the Prompt (Qwen Format)
+    prompt = f"""<|im_start|>system
+    You are an expert Tea Agronomist for Sri Lanka. 
+    Use the Context below to answer the farmer's question.
+    If the answer is in the Context, quote it. 
+    If not, give helpful general advice about tea farming.
+    Keep answers concise and friendly.
+
+    Context:
+    {context}<|im_end|>
+    <|im_start|>user
+    {user_query}<|im_end|>
+    <|im_start|>assistant
+    """
+
+    # Step 3: Generator Function
+    def iter_tokens():
+        stream = llm(
+            prompt,
+            max_tokens=256,
+            stop=["<|im_end|>"],
+            stream=True, # Enable streaming
+            temperature=0.7
+        )
+        for output in stream:
+            yield output['choices'][0]['text']
+
+    # Return as a stream (Typewriter effect)
+    return StreamingResponse(iter_tokens(), media_type="text/plain")

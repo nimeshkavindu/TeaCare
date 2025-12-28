@@ -8,6 +8,7 @@ import 'weather_screen.dart';
 import 'community_screen.dart';
 import 'profile_screen.dart';
 import 'heat_map_screen.dart';
+import 'tea_chat_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   final String userName;
@@ -205,6 +206,7 @@ class _HomeScreenState extends State<HomeScreen> {
       const SizedBox(),
       CommunityScreen(userId: widget.userId, userName: widget.userName),
       const HeatMapScreen(),
+      const TeaChatScreen(),
     ];
 
     return Scaffold(
@@ -373,6 +375,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 _buildNavItem(1, Icons.qr_code_scanner_rounded, "Scan"),
                 _buildNavItem(2, Icons.forum_rounded, "Community"),
                 _buildNavItem(3, Icons.map_rounded, "Map"),
+                _buildNavItem(4, Icons.support_agent_rounded, "AI Chat"),
               ],
             ),
           ),
