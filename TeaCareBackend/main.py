@@ -20,7 +20,8 @@ import httpx
 from llama_cpp import Llama
 from fastapi.responses import StreamingResponse
 import chromadb
-from chromadb.utils import embedding_functions
+from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
+from fastembed import TextEmbedding
 from pypdf import PdfReader
 
 # --- DATABASE CONFIG ---
@@ -99,21 +100,26 @@ class Treatment(Base):
 
 Base.metadata.create_all(bind=engine)
 
-# --- VECTOR DATABASE SETUP (ChromaDB) ---
-print("Initializing Vector Database...")
+# --- VECTOR DATABASE SETUP (Custom FastEmbed Wrapper) ---
+print("Initializing Vector Database (FastEmbed Mode)...")
 
-# 1. Setup Storage (Creates 'tea_vectordb' folder)
+# 1. Define the Wrapper Class manually
+class MyFastEmbedFunction(EmbeddingFunction):
+    def __init__(self):
+        # Automatically downloads the lightweight model
+        self.model = TextEmbedding(model_name="BAAI/bge-small-en-v1.5")
+    
+    def __call__(self, input: Documents) -> Embeddings:
+        # Converts text to vector numbers
+        return list(self.model.embed(input))
+
+# 2. Setup Storage
 chroma_client = chromadb.PersistentClient(path="./tea_vectordb")
 
-# 2. Setup Embedding Model (Small & Fast)
-sentence_transformer_ef = embedding_functions.SentenceTransformerEmbeddingFunction(
-    model_name="all-MiniLM-L6-v2"
-)
-
-# 3. Create Collection
+# 3. Create Collection using our Custom Wrapper
 knowledge_collection = chroma_client.get_or_create_collection(
     name="tea_knowledge",
-    embedding_function=sentence_transformer_ef
+    embedding_function=MyFastEmbedFunction()
 )
 print("✅ Vector Database Ready!")
 
@@ -194,14 +200,16 @@ def is_blurry(image_bytes, threshold=35.0):
 
 # --- LOAD AI MODEL ---
 print("Loading AI Model...")
+model = None  
+
 try:
     model = tf.keras.models.load_model('tea_leaf_efficientnet.keras')
     with open('class_names.pkl', 'rb') as f:
         class_names = pickle.load(f)
-    print("Model loaded successfully!")
+    print("✅ Model loaded successfully!")
 except Exception as e:
-    print(f"Error loading model: {e}")
-    class_names = ["Error"] * 10 
+    print(f"❌ Error loading model: {e}")
+    class_names = ["Error"] * 10
 
 
 # --- PREDICTION ENDPOINT (WITH TTA & BLUR CHECK) ---
@@ -211,6 +219,13 @@ async def predict_disease(
     file: UploadFile = File(...), 
     db: Session = Depends(get_db)
 ):
+    
+    if model is None:
+        return {
+            "error": "The AI Model is offline. Check server logs.",
+            "disease_name": "System Error", 
+            "confidence": "0%"
+        }
     try:
         # 1. Read Content
         contents = await file.read()
