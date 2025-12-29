@@ -19,6 +19,9 @@ import re
 import httpx
 from llama_cpp import Llama
 from fastapi.responses import StreamingResponse
+import chromadb
+from chromadb.utils import embedding_functions
+from pypdf import PdfReader
 
 # --- DATABASE CONFIG ---
 SQLALCHEMY_DATABASE_URL = "postgresql://postgres:admin123@localhost/teacare_db"
@@ -94,15 +97,25 @@ class Treatment(Base):
     instruction = Column(String)
     safety_tip = Column(String)
 
-class TeaKnowledge(Base):
-    __tablename__ = "tea_knowledge"
-    id = Column(Integer, primary_key=True, index=True)
-    category = Column(String)  # e.g. "Fertilizer"
-    title = Column(String)     # e.g. "Urea Guidelines"
-    content = Column(String)   # The actual text paragraph
-    source = Column(String)    # e.g. "TRI Handbook Vol 1"
-
 Base.metadata.create_all(bind=engine)
+
+# --- VECTOR DATABASE SETUP (ChromaDB) ---
+print("Initializing Vector Database...")
+
+# 1. Setup Storage (Creates 'tea_vectordb' folder)
+chroma_client = chromadb.PersistentClient(path="./tea_vectordb")
+
+# 2. Setup Embedding Model (Small & Fast)
+sentence_transformer_ef = embedding_functions.SentenceTransformerEmbeddingFunction(
+    model_name="all-MiniLM-L6-v2"
+)
+
+# 3. Create Collection
+knowledge_collection = chroma_client.get_or_create_collection(
+    name="tea_knowledge",
+    embedding_function=sentence_transformer_ef
+)
+print("✅ Vector Database Ready!")
 
 # --- VALIDATION SCHEMAS ---
 class UserRegister(BaseModel):
@@ -151,6 +164,7 @@ class CommentRequest(BaseModel):
     user_id: int
     author_name: str
     content: str
+
 
 # --- APP SETUP ---
 app = FastAPI()
@@ -294,7 +308,7 @@ async def predict_disease(
         print(f"Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# --- NEW: UPDATE LOCATION ---
+# --- UPDATE LOCATION ---
 @app.patch("/history/{report_id}/location")
 def update_location(report_id: int, loc: LocationUpdate, db: Session = Depends(get_db)):
     report = db.query(DiseaseReport).filter(DiseaseReport.report_id == report_id).first()
@@ -551,108 +565,129 @@ print("LLM is Ready!")
 
 # --- CHATBOT LOGIC ---
 
-# 1. Add Knowledge (Admin will use this later)
-class KnowledgeRequest(BaseModel):
-    category: str
-    title: str
-    content: str
-    source: str
+# 1. PDF Upload Endpoint 
+@app.post("/upload_book")
+async def upload_book(file: UploadFile = File(...), category: str = Form("General")):
+    print(f"📥 Receiving PDF: {file.filename}...")
 
-@app.post("/add_knowledge")
-def add_knowledge(item: KnowledgeRequest, db: Session = Depends(get_db)):
-    new_entry = TeaKnowledge(
-        category=item.category,
-        title=item.title,
-        content=item.content,
-        source=item.source
-    )
-    db.add(new_entry)
-    db.commit()
-    return {"message": "Knowledge added successfully"}
+    # A. Read PDF Text
+    try:
+        pdf_reader = PdfReader(file.file)
+        full_text = ""
+        for page in pdf_reader.pages:
+            text = page.extract_text()
+            if text:
+                full_text += text + "\n"
+        
+        print(f"📖 Extracted {len(full_text)} characters.")
 
-# 2. Search Function (With Debug Logs)
+        # B. Chunking 
+        chunk_size = 1000
+        chunks = [full_text[i:i+chunk_size] for i in range(0, len(full_text), chunk_size)]
+        
+        print(f"✂️ Sliced into {len(chunks)} chunks.")
+
+        # C. Save to ChromaDB
+        ids = []
+        documents = []
+        metadatas = []
+
+        for i, chunk in enumerate(chunks):
+            chunk_id = f"{file.filename}_part_{i}"
+            ids.append(chunk_id)
+            documents.append(chunk)
+            metadatas.append({
+                "source": file.filename,
+                "category": category
+            })
+
+        knowledge_collection.add(ids=ids, documents=documents, metadatas=metadatas)
+        print("✅ Knowledge stored in Vector Database!")
+        
+        return {"message": f"Successfully learned {len(chunks)} chunks from '{file.filename}'."}
+
+    except Exception as e:
+        print(f"❌ PDF Error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to process PDF")
+
+# 2. Semantic Search Function
 def retrieve_context(query: str, db: Session):
-    print(f"\n🔎 SEARCHING DATABASE FOR: '{query}'") # <--- NEW LOG
+    print(f"\n🧠 SEMANTIC SEARCH FOR: '{query}'")
 
-    results = []
-    clean_query = query.replace("?", "").replace(".", "")
-    
-    # Search General Knowledge (Books)
-    knowledge = db.query(TeaKnowledge).filter(
-        or_(
-            TeaKnowledge.content.ilike(f"%{clean_query}%"),
-            TeaKnowledge.title.ilike(f"%{clean_query}%")
-        )
-    ).limit(3).all()
-    
-    for k in knowledge:
-        results.append(f"Fact: {k.content} (Source: {k.source})")
+    # A. Query Vector DB (Chroma)
+    results = knowledge_collection.query(
+        query_texts=[query],
+        n_results=1 
+    )
 
-    # --- NEW LOGGING LOGIC ---
-    if results:
-        print(f"✅ FOUND {len(results)} RECORDS:")
-        for i, res in enumerate(results):
-            print(f"   [{i+1}] {res[:100]}...") 
+    context_list = []
+
+    # Check Vector Results
+    if results['documents'] and results['documents'][0]:
+        print(f"✅ FOUND {len(results['documents'][0])} MATCHES:")
+        for i, doc in enumerate(results['documents'][0]):
+            source = results['metadatas'][0][i]['source']
+            context_list.append(f"Fact: {doc} (Source: {source})")
+            print(f"   [{i+1}] {doc[:100]}...")
     else:
-        print("❌ NO RECORDS FOUND.")
-    # -------------------------
+        print("❌ NO VECTOR MATCHES.")
 
-    if not results:
-        # Change this return string to enforce strictness
-        return "NO_DATA_FOUND" 
-    
-    return "\n\n".join(results)
+    # B. Append Disease Info (from SQL) for backup
+    clean_query = query.replace("?", "").replace(".", "")
+    diseases = db.query(DiseaseInfo).filter(DiseaseInfo.name.ilike(f"%{clean_query}%")).limit(1).all()
+    for d in diseases:
+        context_list.append(f"Disease Info: {d.name}. Symptoms: {', '.join(d.symptoms)}.")
 
-# 3. Chat Endpoint (The "Generation")
+    if not context_list:
+        return "NO_DATA_FOUND"
+
+    return "\n\n".join(context_list)
+
+# 3. Chat Endpoint (Strict Generation)
 @app.post("/chat_stream")
 async def chat_stream(
     user_query: str = Form(...),
     db: Session = Depends(get_db)
 ):
-    # Step 1: Find relevant info
+    # Step 1: Find Context (Vector + SQL)
     context = retrieve_context(user_query, db)
-
+    
+    # Step 2: Build Strict Prompt
     if context == "NO_DATA_FOUND":
         system_instruction = (
             "You are a Tea Assistant. "
             "The user asked a question, but you have NO information about it in your database. "
-            "Politely apologize and say you only know about topics in the TeaCare database. "
-            "Do NOT make up an answer."
+            "Politely apologize and say you only know about topics in the uploaded TeaCare documents."
         )
     else:
         system_instruction = (
-            "You are an expert Tea Agronomist for Sri Lanka. "
+            "You are an expert Tea Agronomist. "
             "Use the Context below to answer the farmer's question. "
             "STRICT RULE: Answer ONLY using the facts provided in the Context. "
             "If the Context does not contain the answer, say 'I do not have that specific information'. "
+            "Keep answers concise."
         )
-    
-    # Step 2: Build the Prompt (Qwen Format)
+
     prompt = f"""<|im_start|>system
-    You are an expert Tea Agronomist for Sri Lanka. 
-    Use the Context below to answer the farmer's question.
-    If the answer is in the Context, quote it. 
-    If not, give helpful general advice about tea farming.
-    Keep answers concise and friendly.
+{system_instruction}
 
-    Context:
-    {context}<|im_end|>
-    <|im_start|>user
-    {user_query}<|im_end|>
-    <|im_start|>assistant
-    """
-
-    # Step 3: Generator Function
+Context:
+{context}<|im_end|>
+<|im_start|>user
+{user_query}<|im_end|>
+<|im_start|>assistant
+"""
+    
+    # Step 3: Generate Stream
     def iter_tokens():
         stream = llm(
             prompt,
-            max_tokens=256,
+            max_tokens=256, 
             stop=["<|im_end|>"],
-            stream=True, # Enable streaming
-            temperature=0.7
+            stream=True,
+            temperature=0.5
         )
         for output in stream:
             yield output['choices'][0]['text']
 
-    # Return as a stream (Typewriter effect)
     return StreamingResponse(iter_tokens(), media_type="text/plain")
