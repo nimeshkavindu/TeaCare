@@ -203,7 +203,7 @@ print("Loading AI Model...")
 model = None  
 
 try:
-    model = tf.keras.models.load_model('tea_leaf_efficientnet.keras')
+    model = tf.keras.models.load_model('tea_leaf_convnext.keras')
     with open('class_names.pkl', 'rb') as f:
         class_names = pickle.load(f)
     print("✅ Model loaded successfully!")
@@ -571,7 +571,7 @@ def get_comments(post_id: int, db: Session = Depends(get_db)):
 # --- AI ENGINE ---
 print("Loading LLM...")
 llm = Llama(
-    model_path="models/qwen2.5-1.5b-instruct-q4_k_m.gguf", 
+    model_path="models/qwen2.5-0.5b-instruct-q4_k_m.gguf", 
     n_ctx=2048,      # Context window 
     n_threads=4,     # CPU threads to use
     verbose=False
@@ -632,7 +632,7 @@ def retrieve_context(query: str, db: Session):
     # A. Query Vector DB (Chroma)
     results = knowledge_collection.query(
         query_texts=[query],
-        n_results=1 
+        n_results=3 
     )
 
     context_list = []

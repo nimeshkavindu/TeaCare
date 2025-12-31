@@ -19,6 +19,7 @@ TeaCareBackend/uploads/
 *.gguf
 *.pt
 *.pth
+*.keras
 
 # (Optional) If you want to ignore the Keras model too, uncomment this:
 # *.keras
