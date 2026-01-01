@@ -12,12 +12,12 @@ class TeaChatScreen extends StatefulWidget {
 class _TeaChatScreenState extends State<TeaChatScreen> {
   final TextEditingController _controller = TextEditingController();
   final ScrollController _scrollController = ScrollController();
-  final List<Map<String, String>> _messages = []; 
+  final List<Map<String, String>> _messages = [];
   bool _isTyping = false;
   String _currentStreamResponse = "";
 
   // Update with your IP
-  final String serverUrl = "http://192.168.8.122:8000"; 
+  final String serverUrl = "http://192.168.8.122:8000";
 
   // --- SEND MESSAGE ---
   void _sendMessage(String text) async {
@@ -27,10 +27,10 @@ class _TeaChatScreenState extends State<TeaChatScreen> {
     setState(() {
       _messages.add({'role': 'user', 'text': text});
       _isTyping = true;
-      _currentStreamResponse = ""; 
+      _currentStreamResponse = "";
       _controller.clear();
       // Add Placeholder for Bot
-      _messages.add({'role': 'bot', 'text': ''}); 
+      _messages.add({'role': 'bot', 'text': ''});
     });
     _scrollToBottom();
 
@@ -87,6 +87,41 @@ class _TeaChatScreenState extends State<TeaChatScreen> {
     });
   }
 
+  // --- NEW HELPER: Parses **bold** text ---
+  Widget _buildBoldText(String text, bool isUser) {
+    final TextStyle baseStyle = TextStyle(
+      color: isUser ? Colors.white : Colors.black87,
+      fontSize: 15,
+    );
+    final TextStyle boldStyle = baseStyle.copyWith(fontWeight: FontWeight.bold);
+
+    // Regex to find text between double asterisks: **text**
+    final RegExp exp = RegExp(r'\*\*(.*?)\*\*');
+    final List<InlineSpan> spans = [];
+    int start = 0;
+
+    // Loop through matches
+    for (final Match match in exp.allMatches(text)) {
+      // Add text BEFORE the asterisks
+      if (match.start > start) {
+        spans.add(TextSpan(text: text.substring(start, match.start), style: baseStyle));
+      }
+      // Add the text INSIDE the asterisks (Group 1) as bold
+      spans.add(TextSpan(text: match.group(1), style: boldStyle));
+      // Update start index
+      start = match.end;
+    }
+
+    // Add any remaining text after the last match
+    if (start < text.length) {
+      spans.add(TextSpan(text: text.substring(start), style: baseStyle));
+    }
+
+    return RichText(
+      text: TextSpan(children: spans.isEmpty ? [TextSpan(text: text, style: baseStyle)] : spans),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -136,10 +171,8 @@ class _TeaChatScreenState extends State<TeaChatScreen> {
                       ),
                       boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 5)],
                     ),
-                    child: Text(
-                      msg['text']!,
-                      style: TextStyle(color: isUser ? Colors.white : Colors.black87, fontSize: 15),
-                    ),
+                    // --- CHANGED: Use helper function instead of simple Text ---
+                    child: _buildBoldText(msg['text']!, isUser),
                   ),
                 );
               },

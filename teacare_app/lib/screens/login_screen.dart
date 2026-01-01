@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
-import 'home_screen.dart'; 
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:http/http.dart' as http; // RESTORED
+import 'dart:convert'; // RESTORED
+import 'package:shared_preferences/shared_preferences.dart'; // RESTORED
+import 'home_screen.dart'; // RESTORED
+import 'register_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -12,21 +13,33 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  // Custom Colors
-  static const Color kPrimaryGreen = Color(0xFF13EC5B);
-  static const Color kBackground = Color(0xFFF6F8F6);
-  static const Color kTextDark = Color(0xFF111813);
-  static const Color kBorderColor = Color(0xFFDBE6DF);
+  // --- STATE & CONTROLLERS ---
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
+  
+  bool _isObscure = true;
+  bool _isLoading = false; // RESTORED: Loading state
 
-  final TextEditingController _identifierCtrl = TextEditingController(); 
-  final TextEditingController _secretCtrl = TextEditingController(); 
+  // RESTORED: Your Server URL
+  final String serverUrl = "http://192.168.8.122:8000/login"; 
 
-  bool _isLoading = false;
+  // --- COLORS (New Design) ---
+  final Color kPrimaryColor = const Color(0xFF4CAE4F); 
+  final Color kBackgroundColor = const Color(0xFFF9FAFB); 
+  final Color kSurfaceColor = const Color(0xFFFFFFFF); 
+  final Color kTextColor = const Color(0xFF1F2937); 
+  final Color kTextMuted = const Color(0xFF6B7280); 
+  final Color kInputBorder = const Color(0xFFD1D5DB); 
 
-  // UPDATE THIS IP
-  final String serverUrl = "http://192.168.8.122:8000/login";
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
 
-  // --- HELPER: Parse Backend Errors Safely ---
+  // --- LOGIC SECTION (Restored from Old Code) ---
+
   String _getBackendError(String responseBody) {
     try {
       final data = jsonDecode(responseBody);
@@ -42,13 +55,12 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _handleLogin() async {
-    String identifier = _identifierCtrl.text.trim();
-    String secret = _secretCtrl.text.trim();
+    // Map new controllers to logic
+    String identifier = _emailController.text.trim();
+    String secret = _passwordController.text.trim();
 
     if (identifier.isEmpty || secret.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Please enter your credentials")),
-      );
+      _showError("Please enter your credentials");
       return;
     }
 
@@ -83,6 +95,7 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
         );
 
+        // Navigate to Home
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
@@ -93,7 +106,6 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
         );
       } else {
-        // Safe Error Handling
         _showError(_getBackendError(response.body));
       }
     } catch (e) {
@@ -110,79 +122,216 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
+  // --- UI SECTION (New Design) ---
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: kBackground,
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        iconTheme: const IconThemeData(color: kTextDark), 
-      ),
+      backgroundColor: kBackgroundColor,
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 24.0),
+          padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 12.0),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              const SizedBox(height: 20),
-              Container(
-                height: 96,
-                width: 96,
-                decoration: BoxDecoration(
-                  color: kPrimaryGreen.withOpacity(0.2),
-                  shape: BoxShape.circle,
+              // 1. Header with Back Button
+              Align(
+                alignment: Alignment.centerLeft,
+                child: IconButton(
+                  onPressed: () => Navigator.pop(context),
+                  icon: Icon(Icons.arrow_back, color: kTextColor),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(), 
                 ),
-                child: const Icon(Icons.spa, color: kPrimaryGreen, size: 48),
               ),
-              const SizedBox(height: 32),
-              const Text(
+              
+              const SizedBox(height: 40),
+
+              // 2. Logo Section
+              Container(
+                width: 96,
+                height: 96,
+                decoration: BoxDecoration(
+                  color: kPrimaryColor.withOpacity(0.2),
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.05),
+                      blurRadius: 20,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Icon(
+                  Icons.eco_rounded, 
+                  color: kPrimaryColor,
+                  size: 48,
+                ),
+              ),
+
+              const SizedBox(height: 24),
+
+              // 3. Welcome Text
+              Text(
                 "Welcome to TeaCare",
-                style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: kTextDark, height: 1.2),
                 textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 26,
+                  fontWeight: FontWeight.bold,
+                  color: kTextColor,
+                  fontFamily: 'Poppins', 
+                ),
               ),
               const SizedBox(height: 8),
               Text(
                 "Log in with Phone or Email",
-                style: TextStyle(fontSize: 16, color: kTextDark.withOpacity(0.7)),
                 textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                  color: kTextMuted,
+                ),
               ),
+
               const SizedBox(height: 40),
 
-              // Inputs
-              Align(alignment: Alignment.centerLeft, child: const Text("Phone Number or Email", style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500, color: kTextDark))),
-              const SizedBox(height: 8),
-              TextField(
-                controller: _identifierCtrl,
-                keyboardType: TextInputType.emailAddress,
-                decoration: _inputDecor("Enter phone or email", Icons.person_outline),
-              ),
-              const SizedBox(height: 24),
+              // 4. Input Fields Form
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // --- Phone/Email Input ---
+                  _buildInputLabel("Phone Number or Email"),
+                  const SizedBox(height: 8),
+                  TextFormField(
+                    controller: _emailController,
+                    decoration: _buildInputDecoration(
+                      hintText: "Enter phone or email",
+                      prefixIcon: Icons.person_outline_rounded,
+                    ),
+                    style: TextStyle(color: kTextColor),
+                  ),
 
-              Align(alignment: Alignment.centerLeft, child: const Text("PIN or Password", style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500, color: kTextDark))),
-              const SizedBox(height: 8),
-              TextField(
-                controller: _secretCtrl,
-                obscureText: true,
-                decoration: _inputDecor("Enter PIN or Password", Icons.lock_outline),
-              ),
-              const SizedBox(height: 40),
+                  const SizedBox(height: 24),
 
+                  // --- Password Input ---
+                  _buildInputLabel("PIN or Password"),
+                  const SizedBox(height: 8),
+                  TextFormField(
+                    controller: _passwordController,
+                    obscureText: _isObscure,
+                    decoration: _buildInputDecoration(
+                      hintText: "Enter PIN or Password",
+                      prefixIcon: Icons.lock_outline_rounded,
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          _isObscure
+                              ? Icons.visibility_off_outlined
+                              : Icons.visibility_outlined,
+                          color: kTextMuted,
+                        ),
+                        onPressed: () {
+                          setState(() {
+                            _isObscure = !_isObscure;
+                          });
+                        },
+                      ),
+                    ),
+                    style: TextStyle(color: kTextColor),
+                  ),
+
+                  // --- Forgot Password ---
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: () {
+                        // Handle forgot password logic here if needed
+                      },
+                      child: Text(
+                        "Forgot Password?",
+                        style: TextStyle(
+                          color: kPrimaryColor,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 32),
+
+              // 5. Login Button (NOW FUNCTIONAL)
               SizedBox(
                 width: double.infinity,
                 height: 56,
                 child: ElevatedButton(
-                  onPressed: _isLoading ? null : _handleLogin,
+                  // RESTORED: Logic connection
+                  onPressed: _isLoading ? null : _handleLogin, 
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: kPrimaryGreen,
-                    foregroundColor: kTextDark,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    backgroundColor: kPrimaryColor,
+                    foregroundColor: Colors.white,
+                    elevation: 4,
+                    shadowColor: kPrimaryColor.withOpacity(0.4),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(30), 
+                    ),
                   ),
-                  child: _isLoading
-                      ? const CircularProgressIndicator(color: kTextDark)
-                      : const Text("Login", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  child: _isLoading 
+                    ? const SizedBox(
+                        height: 24, 
+                        width: 24, 
+                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)
+                      )
+                    : Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: const [
+                          Text(
+                            "Login",
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          SizedBox(width: 8),
+                          Icon(Icons.arrow_forward_rounded, size: 20),
+                        ],
+                      ),
                 ),
               ),
+
+              const SizedBox(height: 24),
+
+              // 6. Footer (Sign Up)
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    "Don't have an account? ",
+                    style: TextStyle(color: kTextMuted, fontSize: 14),
+                  ),
+                  GestureDetector(
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const RegisterScreen(),
+                        ),
+                      );
+                    },
+                    child: Text(
+                      "Sign Up",
+                      style: TextStyle(
+                        color: kPrimaryColor,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              
+              const SizedBox(height: 20),
             ],
           ),
         ),
@@ -190,17 +339,47 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  InputDecoration _inputDecor(String hint, IconData icon) {
+  // --- Helper Methods ---
+
+  Widget _buildInputLabel(String label) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 4.0),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: kTextColor,
+          fontWeight: FontWeight.w600,
+          fontSize: 14,
+        ),
+      ),
+    );
+  }
+
+  InputDecoration _buildInputDecoration({
+    required String hintText,
+    required IconData prefixIcon,
+    Widget? suffixIcon,
+  }) {
     return InputDecoration(
-      hintText: hint,
-      prefixIcon: Icon(icon, color: Colors.grey),
-      hintStyle: TextStyle(color: kTextDark.withOpacity(0.4)),
       filled: true,
-      fillColor: Colors.white,
-      contentPadding: const EdgeInsets.all(16),
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: kBorderColor)),
-      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: kBorderColor)),
-      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: kPrimaryGreen, width: 2)),
+      fillColor: kSurfaceColor,
+      hintText: hintText,
+      hintStyle: TextStyle(color: kTextMuted.withOpacity(0.6), fontSize: 14),
+      prefixIcon: Icon(prefixIcon, color: kTextMuted),
+      suffixIcon: suffixIcon,
+      contentPadding: const EdgeInsets.symmetric(vertical: 18, horizontal: 16),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: kInputBorder),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: kInputBorder),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: kPrimaryColor, width: 2),
+      ),
     );
   }
 }

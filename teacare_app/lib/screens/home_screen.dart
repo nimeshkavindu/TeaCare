@@ -590,7 +590,7 @@ class _HomeScreenState extends State<HomeScreen> {
             crossAxisCount: 2,
             crossAxisSpacing: 16,
             mainAxisSpacing: 16,
-            childAspectRatio: 1.4, 
+            childAspectRatio: 1.4,
             children: [
               _buildModernActionCard(
                 Icons.wb_sunny_rounded,
@@ -622,17 +622,17 @@ class _HomeScreenState extends State<HomeScreen> {
                 },
               ),
               _buildModernActionCard(
-                Icons.support_agent_rounded,
+                Icons.tips_and_updates_rounded,
                 Colors.purple,
-                "Expert Help",
-                "Chat with pros",
+                "App Guide",
+                "How to use",
                 () {},
               ),
               _buildModernActionCard(
-                Icons.currency_exchange_rounded,
+                Icons.local_florist_rounded,
                 Colors.green,
-                "Market Price",
-                "Live rates",
+                "Crop Manual",
+                "Care & Tips",
                 () {},
               ),
             ],
