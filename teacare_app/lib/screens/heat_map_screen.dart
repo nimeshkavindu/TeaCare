@@ -32,7 +32,7 @@ class _HeatMapScreenState extends State<HeatMapScreen> {
   String _selectedTime = "All Time";
   final List<String> _timeFilters = ["All Time", "24h", "This Week", "This Month", "This Year"];
 
-  LatLng _center = const LatLng(7.8731, 80.7718); 
+  final LatLng _center = const LatLng(7.8731, 80.7718); 
 
   @override
   void initState() {

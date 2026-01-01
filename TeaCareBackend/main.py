@@ -23,6 +23,7 @@ import chromadb
 from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 from fastembed import TextEmbedding
 from pypdf import PdfReader
+from fastapi.middleware.cors import CORSMiddleware
 
 # --- DATABASE CONFIG ---
 SQLALCHEMY_DATABASE_URL = "postgresql://postgres:admin123@localhost/teacare_db"
@@ -176,6 +177,14 @@ class CommentRequest(BaseModel):
 app = FastAPI()
 os.makedirs("uploads", exist_ok=True)
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  
+    allow_credentials=True,
+    allow_methods=["*"],  
+    allow_headers=["*"],  
+)
 
 def get_db():
     db = SessionLocal()
@@ -381,13 +390,35 @@ def register(user: UserRegister, db: Session = Depends(get_db)):
 
 @app.post("/login")
 def login(request: LoginRequest, db: Session = Depends(get_db)):
+    print(f"DEBUG: Login attempt for: {request.identifier}")
+    print(f"DEBUG: Secret provided: {request.secret}")
+
     ident = request.identifier.lower() if "@" in request.identifier else request.identifier
+    
+    # 1. Check if user exists
     user = db.query(User).filter(or_(User.phone_number == ident, User.email == ident)).first()
+    
+    if not user:
+        print("DEBUG: User NOT found in DB")
+        raise HTTPException(status_code=401, detail="Invalid credentials (User not found)")
+    
+    print(f"DEBUG: User found: {user.email}")
+    print(f"DEBUG: Stored Hash: {user.password_hash}")
 
-    if not user or not verify_password(request.secret, user.password_hash):
-        raise HTTPException(status_code=401, detail="Invalid credentials")
+    # 2. Check password verification
+    is_valid = verify_password(request.secret, user.password_hash)
+    print(f"DEBUG: Password Valid? {is_valid}")
 
-    return {"message": "Login successful", "user_id": user.user_id, "name": user.full_name, "role": user.role}
+    if not is_valid:
+        print("DEBUG: Password verification failed")
+        raise HTTPException(status_code=401, detail="Invalid credentials (Password mismatch)")
+
+    return {
+        "message": "Login successful", 
+        "user_id": user.user_id, 
+        "name": user.full_name, 
+        "role": user.role
+    }
 
 @app.get("/history/{user_id}")
 def get_history(user_id: int, db: Session = Depends(get_db)):
@@ -693,7 +724,7 @@ Context:
 <|im_start|>assistant
 """
     
-    # Step 3: Generate Stream
+    # Generate Stream
     def iter_tokens():
         stream = llm(
             prompt,

@@ -590,7 +590,7 @@ class _HomeScreenState extends State<HomeScreen> {
             crossAxisCount: 2,
             crossAxisSpacing: 16,
             mainAxisSpacing: 16,
-            childAspectRatio: 1.4, // Making cards slightly wider
+            childAspectRatio: 1.4, 
             children: [
               _buildModernActionCard(
                 Icons.wb_sunny_rounded,

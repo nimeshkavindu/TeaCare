@@ -1,0 +1,83 @@
+'use client';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import { 
+  LayoutDashboard, 
+  Users, 
+  ShieldAlert, 
+  BookOpen, 
+  LogOut, 
+  Sprout 
+} from 'lucide-react';
+
+// Define the menu items in one place
+const adminLinks = [
+  { href: '/admin', label: 'System Health', icon: LayoutDashboard },
+  { href: '/admin/users', label: 'User Management', icon: Users },
+  { href: '/admin/moderation', label: 'Forum Moderation', icon: ShieldAlert },
+  { href: '/admin/knowledge', label: 'Knowledge Base', icon: BookOpen },
+];
+
+export default function AdminLayout({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+
+  return (
+    <div className="flex h-screen bg-slate-50">
+      
+      {/* --- SIDEBAR --- */}
+      <aside className="w-64 bg-slate-900 text-slate-100 flex flex-col shadow-xl z-10 fixed h-full">
+        {/* Brand Header */}
+        <div className="p-6 border-b border-slate-800 flex items-center gap-3">
+          <div className="bg-green-600 p-2 rounded-lg">
+            <Sprout size={24} className="text-white" />
+          </div>
+          <div>
+            <h1 className="font-bold text-lg tracking-wide">TeaCare</h1>
+            <p className="text-xs text-slate-400 uppercase tracking-wider">Admin Console</p>
+          </div>
+        </div>
+
+        {/* Navigation Links */}
+        <nav className="flex-1 px-4 py-6 space-y-2">
+          {adminLinks.map((link) => {
+            const Icon = link.icon;
+            const isActive = pathname === link.href;
+            
+            return (
+              <Link 
+                key={link.href} 
+                href={link.href}
+                className={`
+                  flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group
+                  ${isActive 
+                    ? 'bg-green-600 text-white shadow-lg shadow-green-900/20' 
+                    : 'text-slate-400 hover:bg-slate-800 hover:text-white'}
+                `}
+              >
+                <Icon size={20} className={isActive ? 'animate-pulse' : ''} />
+                <span className="font-medium text-sm">{link.label}</span>
+              </Link>
+            );
+          })}
+        </nav>
+
+        {/* Logout Button */}
+        <div className="p-4 border-t border-slate-800">
+          <button className="flex items-center gap-3 w-full px-4 py-3 text-slate-400 hover:text-red-400 hover:bg-red-950/30 rounded-xl transition-all">
+            <LogOut size={20} />
+            <span className="font-medium text-sm">Sign Out</span>
+          </button>
+        </div>
+      </aside>
+
+      {/* --- MAIN CONTENT AREA --- */}
+      {/* We add ml-64 (margin-left) because the sidebar is fixed */}
+      <main className="flex-1 ml-64 p-8 overflow-y-auto h-full">
+        <div className="max-w-6xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
+          {children}
+        </div>
+      </main>
+      
+    </div>
+  );
+}
