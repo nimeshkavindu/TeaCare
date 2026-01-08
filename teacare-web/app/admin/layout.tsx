@@ -7,15 +7,17 @@ import {
   ShieldAlert, 
   BookOpen, 
   LogOut, 
-  Sprout 
+  Sprout,
+  ScrollText // <--- Import this new icon
 } from 'lucide-react';
 
-// Define the menu items in one place
+// Update the menu items array
 const adminLinks = [
   { href: '/admin', label: 'System Health', icon: LayoutDashboard },
   { href: '/admin/users', label: 'User Management', icon: Users },
   { href: '/admin/moderation', label: 'Forum Moderation', icon: ShieldAlert },
   { href: '/admin/knowledge', label: 'Knowledge Base', icon: BookOpen },
+  { href: '/admin/logs', label: 'Activity Logs', icon: ScrollText }, // <--- Added this line
 ];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -26,7 +28,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       
       {/* --- SIDEBAR --- */}
       <aside className="w-64 bg-slate-900 text-slate-100 flex flex-col shadow-xl z-10 fixed h-full">
-        {/* Brand Header */}
         <div className="p-6 border-b border-slate-800 flex items-center gap-3">
           <div className="bg-green-600 p-2 rounded-lg">
             <Sprout size={24} className="text-white" />
@@ -37,7 +38,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           </div>
         </div>
 
-        {/* Navigation Links */}
         <nav className="flex-1 px-4 py-6 space-y-2">
           {adminLinks.map((link) => {
             const Icon = link.icon;
@@ -61,7 +61,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           })}
         </nav>
 
-        {/* Logout Button */}
         <div className="p-4 border-t border-slate-800">
           <button className="flex items-center gap-3 w-full px-4 py-3 text-slate-400 hover:text-red-400 hover:bg-red-950/30 rounded-xl transition-all">
             <LogOut size={20} />
@@ -70,8 +69,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         </div>
       </aside>
 
-      {/* --- MAIN CONTENT AREA --- */}
-      {/* We add ml-64 (margin-left) because the sidebar is fixed */}
       <main className="flex-1 ml-64 p-8 overflow-y-auto h-full">
         <div className="max-w-6xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
           {children}

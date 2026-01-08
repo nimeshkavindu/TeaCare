@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, validator
-from sqlalchemy import create_engine, Column, Integer, String, Float, or_
+from sqlalchemy import create_engine, Column, Integer, String, Float, or_, text, DateTime
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import sessionmaker, Session
@@ -24,12 +24,33 @@ from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 from fastembed import TextEmbedding
 from pypdf import PdfReader
 from fastapi.middleware.cors import CORSMiddleware
+import time
+import uuid
 
 # --- DATABASE CONFIG ---
 SQLALCHEMY_DATABASE_URL = "postgresql://postgres:admin123@localhost/teacare_db"
 engine = create_engine(SQLALCHEMY_DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
+
+# --- HELPER: SYSTEM LOGGING ---
+def log_event(db: Session, level: str, source: str, message: str):
+    try:
+        new_log = SystemLog(level=level, source=source, message=message)
+        db.add(new_log)
+        db.commit()
+    except Exception as e:
+        print(f"Logging failed: {e}")
+
+# --- HELPER: STARTUP LOGGING (Creates its own DB session) ---
+def log_startup_event(level: str, source: str, message: str):
+    db = SessionLocal()
+    try:
+        log_event(db, level, source, message)
+    except Exception as e:
+        print(f"Startup Log Error: {e}")
+    finally:
+        db.close()
 
 # --- SECURITY ---
 pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
@@ -99,30 +120,43 @@ class Treatment(Base):
     instruction = Column(String)
     safety_tip = Column(String)
 
-Base.metadata.create_all(bind=engine)
+class SystemLog(Base):
+    __tablename__ = "system_logs"
+    id = Column(Integer, primary_key=True, index=True)
+    level = Column(String)  # "INFO", "WARNING", "ERROR", "SUCCESS"
+    message = Column(String)
+    source = Column(String) # e.g., "Auth", "AI Engine", "Database"
+    timestamp = Column(DateTime, default=datetime.now)
+
+# --- INIT DATABASE ---
+try:
+    Base.metadata.create_all(bind=engine)
+    log_startup_event("SUCCESS", "Database", "PostgreSQL Connection Established & Tables Checked")
+except Exception as e:
+    print(f"DB Init Error: {e}")
 
 # --- VECTOR DATABASE SETUP (Custom FastEmbed Wrapper) ---
 print("Initializing Vector Database (FastEmbed Mode)...")
 
-# 1. Define the Wrapper Class manually
 class MyFastEmbedFunction(EmbeddingFunction):
     def __init__(self):
-        # Automatically downloads the lightweight model
         self.model = TextEmbedding(model_name="BAAI/bge-small-en-v1.5")
     
     def __call__(self, input: Documents) -> Embeddings:
-        # Converts text to vector numbers
         return list(self.model.embed(input))
 
-# 2. Setup Storage
-chroma_client = chromadb.PersistentClient(path="./tea_vectordb")
+try:
+    chroma_client = chromadb.PersistentClient(path="./tea_vectordb")
+    knowledge_collection = chroma_client.get_or_create_collection(
+        name="tea_knowledge",
+        embedding_function=MyFastEmbedFunction()
+    )
+    print("✅ Vector Database Ready!")
+    log_startup_event("SUCCESS", "Knowledge Base", "Vector Database (ChromaDB) Initialized")
+except Exception as e:
+    print(f"Vector DB Error: {e}")
+    log_startup_event("ERROR", "Knowledge Base", f"Vector DB Failed: {str(e)}")
 
-# 3. Create Collection using our Custom Wrapper
-knowledge_collection = chroma_client.get_or_create_collection(
-    name="tea_knowledge",
-    embedding_function=MyFastEmbedFunction()
-)
-print("✅ Vector Database Ready!")
 
 # --- VALIDATION SCHEMAS ---
 class UserRegister(BaseModel):
@@ -195,33 +229,30 @@ def get_db():
 
 # --- HELPER: BLUR CHECK ---
 def is_blurry(image_bytes, threshold=35.0):
-    # Convert bytes to numpy array for OpenCV
     nparr = np.frombuffer(image_bytes, np.uint8)
     img = cv2.imdecode(nparr, cv2.IMREAD_GRAYSCALE)
-    
-    # Calculate Variance of Laplacian
     score = cv2.Laplacian(img, cv2.CV_64F).var()
-    
-    # LOG THE SCORE (So you can tune it)
     print(f"DEBUG: Blur Score = {score:.2f}") 
-    
     return score < threshold
 
 # --- LOAD AI MODEL ---
 print("Loading AI Model...")
 model = None  
+class_names = []
 
 try:
     model = tf.keras.models.load_model('tea_leaf_convnext.keras')
     with open('class_names.pkl', 'rb') as f:
         class_names = pickle.load(f)
     print("✅ Model loaded successfully!")
+    log_startup_event("SUCCESS", "AI Engine", "ConvNeXt Disease Model Loaded")
 except Exception as e:
     print(f"❌ Error loading model: {e}")
+    log_startup_event("ERROR", "AI Engine", f"ConvNeXt Model Failed: {str(e)}")
     class_names = ["Error"] * 10
 
 
-# --- PREDICTION ENDPOINT (WITH TTA & BLUR CHECK) ---
+# --- PREDICTION ENDPOINT ---
 @app.post("/predict")
 async def predict_disease(
     user_id: int = Form(...),
@@ -230,6 +261,7 @@ async def predict_disease(
 ):
     
     if model is None:
+        log_event(db, "ERROR", "AI Engine", "Prediction failed: Model not loaded")
         return {
             "error": "The AI Model is offline. Check server logs.",
             "disease_name": "System Error", 
@@ -241,13 +273,15 @@ async def predict_disease(
         
         # 2. Check for Blur
         if is_blurry(contents):
+            log_event(db, "WARNING", "AI Engine", f"Rejected image (Blur) from User {user_id}")
             return {
                 "error": "Image is too blurry. Please hold the camera steady and try again.",
                 "blur_score": "Low"
             }
 
         # 3. Save File
-        file_location = f"uploads/{file.filename}"
+        ext = os.path.splitext(file.filename)[1]
+        file_location = f"uploads/{uuid.uuid4()}{ext}"
         with open(file_location, "wb") as buffer:
             buffer.write(contents)
 
@@ -270,41 +304,31 @@ async def predict_disease(
         disease_name = class_names[class_idx] 
         confidence = float(np.max(final_score)) * 100
         
-        # Check if confidence is too low (less than 50%)
+        # Check if confidence is too low
         if confidence < 50:
+            log_event(db, "WARNING", "AI Engine", f"Low Confidence ({confidence:.1f}%) for User {user_id}")
             disease_name = "Unknown / Unclear"
             symptoms = ["The AI is not sure. The image might be unclear, or this disease is not in our database."]
             causes = ["Low image quality", "Unrecognized pattern"]
             treatment_list = []
-            
-            print(f"Low confidence detection ({confidence:.2f}%) for user {user_id}")
-
         else:
             db_disease_name = re.sub(r'^\d+\.\s*', '', disease_name).strip() 
             disease_name = db_disease_name
-            # 6. FETCH DYNAMIC DATA FROM DB
+            # 6. FETCH DYNAMIC DATA
             disease_info = db.query(DiseaseInfo).filter(DiseaseInfo.name.ilike(disease_name)).first()
             
             if disease_info:
                 symptoms = disease_info.symptoms
                 causes = disease_info.causes
-                
                 treatments_db = db.query(Treatment).filter(Treatment.disease_id == disease_info.disease_id).all()
-                treatment_list = [
-                    {
-                        "type": t.type,
-                        "title": t.title,
-                        "instruction": t.instruction,
-                        "safety_tip": t.safety_tip
-                    } for t in treatments_db
-                ]
+                treatment_list = [{"type": t.type, "title": t.title, "instruction": t.instruction, "safety_tip": t.safety_tip} for t in treatments_db]
             else:
-                symptoms = ["Leaf appears healthy"] if "Healthy" in disease_name else ["No details available for this disease."]
+                symptoms = ["Leaf appears healthy"] if "Healthy" in disease_name else ["No details available."]
                 causes = []
                 treatment_list = []
 
         
-        # 7. Save Report to Database
+        # 7. Save Report
         new_report = DiseaseReport(
             user_id=user_id,
             disease_name=disease_name,
@@ -315,9 +339,10 @@ async def predict_disease(
         db.add(new_report)
         db.commit()
         db.refresh(new_report) 
-        
-        # -----------------------------------
 
+        # --- LOG SUCCESS ---
+        log_event(db, "INFO", "AI Engine", f"Prediction: {disease_name} ({confidence:.1f}%)")
+        
         return {
             "report_id": new_report.report_id,
             "disease_name": disease_name,
@@ -329,6 +354,7 @@ async def predict_disease(
         }
 
     except Exception as e:
+        log_event(db, "ERROR", "AI Engine", f"Prediction Crash: {str(e)}")
         print(f"Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -342,16 +368,17 @@ def update_location(report_id: int, loc: LocationUpdate, db: Session = Depends(g
     report.latitude = loc.latitude
     report.longitude = loc.longitude
     db.commit()
+    # No explicit log needed for location updates to save DB space, 
+    # but you could add one if desired.
     return {"message": "Location saved"}
 
 # --- PUBLIC MAP ENDPOINT ---
 @app.get("/reports/locations")
 def get_public_reports(db: Session = Depends(get_db)):
-    # Return all reports that have a location saved
     reports = db.query(DiseaseReport).filter(DiseaseReport.latitude != None).all()
     return reports
 
-# --- NEW: SUBMIT FEEDBACK (Active Learning) ---
+# --- FEEDBACK ---
 @app.post("/history/{report_id}/feedback")
 def submit_feedback(report_id: int, feedback: FeedbackRequest, db: Session = Depends(get_db)):
     report = db.query(DiseaseReport).filter(DiseaseReport.report_id == report_id).first()
@@ -361,12 +388,16 @@ def submit_feedback(report_id: int, feedback: FeedbackRequest, db: Session = Dep
     report.is_correct = "Yes" if feedback.is_correct else "No"
     if not feedback.is_correct:
         report.user_correction = feedback.correct_disease
-        # In a real app, you would move the image to a "retrain" folder here
     
     db.commit()
+    
+    # --- LOG FEEDBACK ---
+    status = "Correct" if feedback.is_correct else f"Incorrect (User said: {feedback.correct_disease})"
+    log_event(db, "INFO", "Feedback", f"Report #{report_id} marked as {status}")
+    
     return {"message": "Feedback received"}
 
-# ... (Keep your existing Register, Login, History, Weather, Forum endpoints below) ...
+# --- REGISTER ---
 @app.post("/register")
 def register(user: UserRegister, db: Session = Depends(get_db)):
     c_type = user.contact_type.lower()
@@ -377,6 +408,7 @@ def register(user: UserRegister, db: Session = Depends(get_db)):
     ).first()
     
     if existing_user:
+        log_event(db, "WARNING", "Auth", f"Register Failed: User already exists ({c_val})")
         raise HTTPException(status_code=400, detail="User already registered")
 
     new_phone = c_val if c_type == "phone" else None
@@ -386,32 +418,28 @@ def register(user: UserRegister, db: Session = Depends(get_db)):
     new_user = User(full_name=user.full_name, phone_number=new_phone, email=new_email, password_hash=hashed_secret, role=user.role)
     db.add(new_user)
     db.commit()
+
+    log_event(db, "SUCCESS", "Auth", f"New user registered: {c_val}")
     return {"message": "Registration successful"}
 
+# --- LOGIN ---
 @app.post("/login")
 def login(request: LoginRequest, db: Session = Depends(get_db)):
-    print(f"DEBUG: Login attempt for: {request.identifier}")
-    print(f"DEBUG: Secret provided: {request.secret}")
-
     ident = request.identifier.lower() if "@" in request.identifier else request.identifier
     
-    # 1. Check if user exists
     user = db.query(User).filter(or_(User.phone_number == ident, User.email == ident)).first()
     
     if not user:
-        print("DEBUG: User NOT found in DB")
+        log_event(db, "WARNING", "Auth", f"Login Failed: User not found ({ident})")
         raise HTTPException(status_code=401, detail="Invalid credentials (User not found)")
     
-    print(f"DEBUG: User found: {user.email}")
-    print(f"DEBUG: Stored Hash: {user.password_hash}")
-
-    # 2. Check password verification
     is_valid = verify_password(request.secret, user.password_hash)
-    print(f"DEBUG: Password Valid? {is_valid}")
 
     if not is_valid:
-        print("DEBUG: Password verification failed")
+        log_event(db, "WARNING", "Auth", f"Login Failed: Wrong Password ({ident})")
         raise HTTPException(status_code=401, detail="Invalid credentials (Password mismatch)")
+
+    log_event(db, "SUCCESS", "Auth", f"User logged in: {user.email or user.phone_number}")
 
     return {
         "message": "Login successful", 
@@ -426,7 +454,7 @@ def get_history(user_id: int, db: Session = Depends(get_db)):
 
 # --- WEATHER ENDPOINT ---
 @app.get("/weather")
-async def get_weather_alert(lat: float = 6.9271, lng: float = 79.8612):
+async def get_weather_alert(lat: float = 6.9271, lng: float = 79.8612, db: Session = Depends(get_db)):
     try:
         # 1. Fetch Weather Data (Open-Meteo)
         weather_url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lng}&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m,precipitation&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum&timezone=auto"
@@ -516,6 +544,8 @@ async def get_weather_alert(lat: float = 6.9271, lng: float = 79.8612):
                     "condition": get_condition(daily["weather_code"][i])
                 })
 
+        log_event(db, "INFO", "Weather", f"Risk check at {location_name} (Lat:{lat:.2f})")
+
         return {
             "location": location_name, 
             "temperature": round(temp),
@@ -531,6 +561,7 @@ async def get_weather_alert(lat: float = 6.9271, lng: float = 79.8612):
 
     except Exception as e:
         print(f"Weather Error: {e}")
+        log_event(db, "ERROR", "Weather", f"Weather API Failed: {str(e)}")
         return {
             "location": "Offline", "temperature": 0, "humidity": 0,
             "condition": "Error", "risk_level": "Unknown", 
@@ -539,7 +570,6 @@ async def get_weather_alert(lat: float = 6.9271, lng: float = 79.8612):
         }
 
 # --- COMMUNITY FORUM ENDPOINTS ---
-
 @app.post("/posts")
 def create_post(
     user_id: int = Form(...),
@@ -551,7 +581,8 @@ def create_post(
 ):
     image_path = None
     if file:
-        file_location = f"uploads/{file.filename}"
+        ext = os.path.splitext(file.filename)[1]
+        file_location = f"uploads/{uuid.uuid4()}{ext}"
         with open(file_location, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
         image_path = file_location
@@ -566,6 +597,8 @@ def create_post(
     )
     db.add(new_post)
     db.commit()
+    
+    log_event(db, "SUCCESS", "Forum", f"New Post ID {new_post.post_id} by User {user_id}")
     return {"message": "Post created successfully"}
 
 @app.get("/posts")
@@ -576,8 +609,7 @@ def get_posts(db: Session = Depends(get_db)):
 @app.post("/posts/{post_id}/like")
 def like_post(post_id: int, db: Session = Depends(get_db)):
     post = db.query(ForumPost).filter(ForumPost.post_id == post_id).first()
-    if not post:
-        raise HTTPException(status_code=404, detail="Post not found")
+    if not post: raise HTTPException(status_code=404, detail="Post not found")
     post.likes += 1
     db.commit()
     return {"likes": post.likes}
@@ -593,6 +625,8 @@ def add_comment(request: CommentRequest, db: Session = Depends(get_db)):
     )
     db.add(new_comment)
     db.commit()
+    
+    log_event(db, "SUCCESS", "Forum", f"Comment added to Post {request.post_id} by {request.author_name}")
     return {"message": "Comment added"}
 
 @app.get("/posts/{post_id}/comments")
@@ -601,39 +635,35 @@ def get_comments(post_id: int, db: Session = Depends(get_db)):
 
 # --- AI ENGINE ---
 print("Loading LLM...")
-llm = Llama(
-    model_path="models/qwen2.5-0.5b-instruct-q4_k_m.gguf", 
-    n_ctx=2048,      # Context window 
-    n_threads=4,     # CPU threads to use
-    verbose=False
-)
-print("LLM is Ready!")
+llm = None
+try:
+    llm = Llama(
+        model_path="models/qwen2.5-0.5b-instruct-q4_k_m.gguf", 
+        n_ctx=2048,      
+        n_threads=4,     
+        verbose=False
+    )
+    print("LLM is Ready!")
+    log_startup_event("SUCCESS", "AI Engine", "Qwen-0.5B LLM Loaded")
+except Exception as e:
+    print(f"LLM Load Failed: {e}")
+    log_startup_event("ERROR", "AI Engine", f"LLM Load Failed: {str(e)}")
 
 # --- CHATBOT LOGIC ---
-
-# 1. PDF Upload Endpoint 
 @app.post("/upload_book")
-async def upload_book(file: UploadFile = File(...), category: str = Form("General")):
+async def upload_book(file: UploadFile = File(...), category: str = Form("General"), db: Session = Depends(get_db)):
     print(f"📥 Receiving PDF: {file.filename}...")
 
-    # A. Read PDF Text
     try:
         pdf_reader = PdfReader(file.file)
         full_text = ""
         for page in pdf_reader.pages:
             text = page.extract_text()
-            if text:
-                full_text += text + "\n"
+            if text: full_text += text + "\n"
         
-        print(f"📖 Extracted {len(full_text)} characters.")
-
-        # B. Chunking 
         chunk_size = 1000
         chunks = [full_text[i:i+chunk_size] for i in range(0, len(full_text), chunk_size)]
         
-        print(f"✂️ Sliced into {len(chunks)} chunks.")
-
-        # C. Save to ChromaDB
         ids = []
         documents = []
         metadatas = []
@@ -642,62 +672,87 @@ async def upload_book(file: UploadFile = File(...), category: str = Form("Genera
             chunk_id = f"{file.filename}_part_{i}"
             ids.append(chunk_id)
             documents.append(chunk)
-            metadatas.append({
-                "source": file.filename,
-                "category": category
-            })
+            metadatas.append({"source": file.filename, "category": category})
 
         knowledge_collection.add(ids=ids, documents=documents, metadatas=metadatas)
-        print("✅ Knowledge stored in Vector Database!")
         
+        log_event(db, "SUCCESS", "Knowledge Base", f"Ingested manual: {file.filename} ({len(chunks)} chunks)")
         return {"message": f"Successfully learned {len(chunks)} chunks from '{file.filename}'."}
+    except Exception as e:
+        log_event(db, "ERROR", "Knowledge Base", f"PDF Ingestion Failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to process PDF")
+    
+def retrieve_context(query: str, db: Session):
+    try:
+        # A. Query Vector DB (Chroma)
+        # We ask for 3 most relevant chunks
+        results = knowledge_collection.query(
+            query_texts=[query],
+            n_results=3 
+        )
+
+        context_list = []
+        sources_found = []  # List to track filenames
+
+        # B. Process Vector Results
+        if results['documents'] and results['documents'][0]:
+            for i, doc in enumerate(results['documents'][0]):
+                # Extract metadata
+                meta = results['metadatas'][0][i]
+                source = meta.get('source', 'Unknown File')
+                
+                # Append to context for the AI
+                context_list.append(f"Fact: {doc} (Source: {source})")
+                
+                # Add to our source list for the user display
+                sources_found.append(source)
+        
+        # C. Fallback to SQL Database (DiseaseInfo Table)
+        # If vector search was weak or empty, we check our traditional DB
+        clean_query = query.replace("?", "").replace(".", "")
+        diseases = db.query(DiseaseInfo).filter(DiseaseInfo.name.ilike(f"%{clean_query}%")).limit(1).all()
+        
+        for d in diseases:
+            context_list.append(f"Disease Info: {d.name}. Symptoms: {', '.join(d.symptoms)}.")
+            sources_found.append(f"TeaCare Database ({d.name})")
+
+        # D. Handle "No Data" Case
+        if not context_list:
+            # Log the warning so you know what content is missing
+            log_event(db, "WARNING", "RAG Engine", f"No context found for: '{query[:30]}...'")
+            return "NO_DATA_FOUND", []
+
+        # E. Log Success
+        # Remove duplicates from source list for cleaner logs
+        unique_sources = list(set(sources_found))
+        source_str = ", ".join(unique_sources)
+        log_event(db, "INFO", "RAG Engine", f"Retrieved context from: {source_str}")
+
+        return "\n\n".join(context_list), unique_sources
 
     except Exception as e:
-        print(f"❌ PDF Error: {e}")
-        raise HTTPException(status_code=500, detail="Failed to process PDF")
+        print(f"Retrieval Error: {e}")
+        log_event(db, "ERROR", "RAG Engine", f"Retrieval Crashed: {str(e)}")
+        return "NO_DATA_FOUND", []
 
-# 2. Semantic Search Function
-def retrieve_context(query: str, db: Session):
-    print(f"\n🧠 SEMANTIC SEARCH FOR: '{query}'")
-
-    # A. Query Vector DB (Chroma)
-    results = knowledge_collection.query(
-        query_texts=[query],
-        n_results=3 
-    )
-
-    context_list = []
-
-    # Check Vector Results
-    if results['documents'] and results['documents'][0]:
-        print(f"✅ FOUND {len(results['documents'][0])} MATCHES:")
-        for i, doc in enumerate(results['documents'][0]):
-            source = results['metadatas'][0][i]['source']
-            context_list.append(f"Fact: {doc} (Source: {source})")
-            print(f"   [{i+1}] {doc[:100]}...")
-    else:
-        print("❌ NO VECTOR MATCHES.")
-
-    # B. Append Disease Info (from SQL) for backup
-    clean_query = query.replace("?", "").replace(".", "")
-    diseases = db.query(DiseaseInfo).filter(DiseaseInfo.name.ilike(f"%{clean_query}%")).limit(1).all()
-    for d in diseases:
-        context_list.append(f"Disease Info: {d.name}. Symptoms: {', '.join(d.symptoms)}.")
-
-    if not context_list:
-        return "NO_DATA_FOUND"
-
-    return "\n\n".join(context_list)
-
-# 3. Chat Endpoint (Strict Generation)
 @app.post("/chat_stream")
 async def chat_stream(
     user_query: str = Form(...),
     db: Session = Depends(get_db)
 ):
-    # Step 1: Find Context (Vector + SQL)
-    context = retrieve_context(user_query, db)
+    # Check if LLM is loaded to prevent crashes
+    if llm is None:
+        log_event(db, "ERROR", "Chatbot", "Chat failed: LLM not loaded")
+        raise HTTPException(status_code=503, detail="AI Service Unavailable")
+
+    # Step 1: Get Context AND Sources
+    context, sources = retrieve_context(user_query, db)
     
+    # --- LOGGING (Privacy Safe) ---
+    # Log only the first 50 chars to protect user privacy while keeping utility
+    safe_log_query = user_query[:50] + "..." if len(user_query) > 50 else user_query
+    log_event(db, "INFO", "Chatbot", f"Query: {safe_log_query}")
+
     # Step 2: Build Strict Prompt
     if context == "NO_DATA_FOUND":
         system_instruction = (
@@ -724,16 +779,49 @@ Context:
 <|im_start|>assistant
 """
     
-    # Generate Stream
+    # Step 3: Generator Function (Streams response + Sources)
     def iter_tokens():
+        # A. Stream the AI's Answer first
         stream = llm(
-            prompt,
+            prompt, 
             max_tokens=256, 
-            stop=["<|im_end|>"],
-            stream=True,
+            stop=["<|im_end|>"], 
+            stream=True, 
             temperature=0.5
         )
+        
         for output in stream:
             yield output['choices'][0]['text']
+        
+        # B. Append the Sources at the bottom (if any exist)
+        # This runs AFTER the AI finishes talking
+        if sources:
+            yield "\n\n---\n**Sources:**\n"
+            for src in sources:
+                yield f"• {src}\n"
 
-    return StreamingResponse(iter_tokens(), media_type="text/plain")
+    return StreamingResponse(iter_tokens(), media_type="text/markdown")
+
+@app.get("/api/health")
+def health_check(db: Session = Depends(get_db)):
+    start_time = time.time()
+    try:
+        db.execute(text("SELECT 1"))
+        db_status = "online"
+    except Exception:
+        db_status = "offline"
+
+    ai_status = "online" if 'model' in globals() and model is not None else "offline"
+    latency = round((time.time() - start_time) * 1000)
+
+    return {
+        "status": "healthy",
+        "api_latency": f"{latency}ms",
+        "services": { "database": db_status, "ai_engine": ai_status, "api": "online" },
+        "timestamp": datetime.now().isoformat()
+    }
+
+@app.get("/api/logs")
+def get_system_logs(limit: int = 10, db: Session = Depends(get_db)):
+    logs = db.query(SystemLog).order_by(SystemLog.timestamp.desc()).limit(limit).all()
+    return logs
