@@ -127,15 +127,7 @@ class WelcomeScreen extends StatelessWidget {
                           ),
                         );
                       },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: primaryColor,
-                        foregroundColor: Colors.white,
-                        elevation: 8,
-                        shadowColor: primaryColor.withOpacity(0.3),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                      ),
+
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: const [
