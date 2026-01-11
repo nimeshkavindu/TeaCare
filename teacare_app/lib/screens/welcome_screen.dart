@@ -127,7 +127,15 @@ class WelcomeScreen extends StatelessWidget {
                           ),
                         );
                       },
-
+                      // --- UPDATED STYLE HERE ---
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: primaryColor, // Filled Green
+                        foregroundColor: Colors.white, // White Text/Icon
+                        elevation: 0, // Flat look (or add elevation if preferred)
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16), // Rounded Corners
+                        ),
+                      ),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: const [
