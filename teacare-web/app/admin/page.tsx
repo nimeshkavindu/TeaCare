@@ -6,9 +6,11 @@ import { Server, Database, Activity, AlertTriangle, CheckCircle2, Clock, Refresh
 interface SystemHealth {
   api_latency: string;
   services: {
-    database: 'online' | 'offline';
-    ai_engine: 'online' | 'offline' | 'degraded';
-    api: 'online' | 'offline';
+    database: { status: 'online' | 'offline', latency: string };
+    vision_model: { status: 'online' | 'offline', model_name: string };
+    llm_model: { status: 'online' | 'offline', model_name: string };
+    weather_api: { status: 'online' | 'offline', latency: string };
+    geo_api: { status: 'online' | 'offline', latency: string };
   };
 }
 
@@ -66,28 +68,49 @@ export default function AdminDashboard() {
       </header>
 
       {/* Status Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-        <StatusCard 
-          title="FastAPI Backend" 
-          status={health?.services.api || 'offline'} 
-          ping={health?.api_latency || '---'} 
-          icon={Server} 
-        />
-        <StatusCard 
-          title="PostgreSQL Database" 
-          status={health?.services.database || 'offline'} 
-          ping={health?.services.database === 'online' ? 'Connected' : 'Failed'} 
-          icon={Database} 
-        />
-        <StatusCard 
-          title="AI Inference Engine" 
-          status={health?.services.ai_engine || 'offline'} 
-          ping={health?.services.ai_engine === 'online' ? 'Ready' : 'Not Loaded'} 
-          icon={Activity} 
-          details={health?.services.ai_engine === 'offline' ? "Model not loaded" : "Active"}
-        />
-      </div>
+      <div className="mb-8">
+        <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">Internal Services</h3>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+          <StatusCard 
+            title="PostgreSQL DB" 
+            status={health?.services.database.status || 'offline'} 
+            ping={health?.services.database.latency || '---'} 
+            icon={Database} 
+          />
+          <StatusCard 
+            title="Vision AI (Leaf)" 
+            status={health?.services.vision_model.status || 'offline'} 
+            ping="Ready"
+            icon={Activity} 
+            details="ConvNeXt Tiny"
+          />
+          <StatusCard 
+            title="Chatbot LLM" 
+            status={health?.services.llm_model.status || 'offline'} 
+            ping="Ready"
+            icon={Activity} 
+            details="Qwen 2.5-0.5B"
+          />
+        </div>
 
+        <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">External APIs</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <StatusCard 
+            title="Open-Meteo Weather" 
+            status={health?.services.weather_api.status || 'offline'} 
+            ping={health?.services.weather_api.latency || '---'} 
+            icon={Server} 
+            details="Live Forecast Source"
+          />
+          <StatusCard 
+            title="OpenStreetMap" 
+            status={health?.services.geo_api.status || 'offline'} 
+            ping={health?.services.geo_api.latency || '---'} 
+            icon={Server} 
+            details="Geocoding Service"
+          />
+        </div>
+      </div>
       {/* Logs Section */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">

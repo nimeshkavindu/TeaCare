@@ -25,7 +25,7 @@ export default function LoginPage() {
       });
 
       const { role, user_id, name } = res.data;
-
+      const userRole = role.toLowerCase(); 
       // 2. Set Cookies 
       // We set them to expire in 1 day
       Cookies.set('token', 'valid-session', { expires: 1 }); 
@@ -34,17 +34,35 @@ export default function LoginPage() {
       Cookies.set('user_name', name, { expires: 1 });
 
       // 3. Redirect based on Role
-      if (role === 'admin') {
+      if (userRole === 'admin') {
         router.push('/admin');
-      } else if (role === 'researcher') {
+      } 
+      // Researchers AND Experts can use the dashboard
+      else if (userRole === 'researcher' || userRole === 'expert') {
         router.push('/dashboard');
-      } else {
-        setError('Farmers must use the mobile app.');
+      } 
+      else {
+        // Farmers (and anyone else) get blocked
+        setError('Mobile Access Only: Farmers please use the TeaCare App.');
         Cookies.remove('token'); 
       }
 
-    } catch (err) {
-      setError('Invalid credentials. Please try again.');
+    } catch (err: any) {
+      
+      if (err.response) {
+        // Check the specific Status Code sent by Backend
+        if (err.response.status === 403) {
+          setError('⛔ Account Suspended. Please contact the Administrator.');
+        } 
+        else if (err.response.status === 401) {
+          setError('❌ Invalid Phone/Email or PIN.');
+        } 
+        else {
+          setError('⚠️ Server Error. Please try again later.');
+        }
+      } else {
+        setError('⚠️ Network Error. Is the backend running?');
+      }
     } finally {
       setLoading(false);
     }

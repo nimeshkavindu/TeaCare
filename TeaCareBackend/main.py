@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, validator
-from sqlalchemy import create_engine, Column, Integer, String, Float, or_, text, DateTime
+from sqlalchemy import create_engine, Column, Integer, String, Float, or_, text, DateTime, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import sessionmaker, Session
@@ -70,7 +70,9 @@ class User(Base):
     email = Column(String, unique=True, nullable=True)
     password_hash = Column(String) 
     role = Column(String) 
-
+    is_active = Column(Boolean, default=True)  
+    last_login = Column(String, nullable=True) 
+    
 class DiseaseReport(Base):
     __tablename__ = "disease_reports"
     report_id = Column(Integer, primary_key=True, index=True)
@@ -127,6 +129,12 @@ class SystemLog(Base):
     message = Column(String)
     source = Column(String) # e.g., "Auth", "AI Engine", "Database"
     timestamp = Column(DateTime, default=datetime.now)
+
+class StatusUpdate(BaseModel):
+    is_active: bool
+
+class RoleUpdate(BaseModel):
+    role: str
 
 # --- INIT DATABASE ---
 try:
@@ -426,27 +434,25 @@ def register(user: UserRegister, db: Session = Depends(get_db)):
 @app.post("/login")
 def login(request: LoginRequest, db: Session = Depends(get_db)):
     ident = request.identifier.lower() if "@" in request.identifier else request.identifier
-    
     user = db.query(User).filter(or_(User.phone_number == ident, User.email == ident)).first()
     
     if not user:
-        log_event(db, "WARNING", "Auth", f"Login Failed: User not found ({ident})")
-        raise HTTPException(status_code=401, detail="Invalid credentials (User not found)")
+        raise HTTPException(status_code=401, detail="Invalid credentials")
     
-    is_valid = verify_password(request.secret, user.password_hash)
+    # --- 1. CHECK IF BANNED ---
+    if not user.is_active:
+        log_event(db, "WARNING", "Auth", f"Blocked login attempt by BANNED user: {ident}")
+        raise HTTPException(status_code=403, detail="Your account has been suspended. Contact Admin.")
 
-    if not is_valid:
-        log_event(db, "WARNING", "Auth", f"Login Failed: Wrong Password ({ident})")
-        raise HTTPException(status_code=401, detail="Invalid credentials (Password mismatch)")
+    if not verify_password(request.secret, user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    log_event(db, "SUCCESS", "Auth", f"User logged in: {user.email or user.phone_number}")
+    # --- 2. UPDATE LAST LOGIN ---
+    user.last_login = datetime.now().strftime("%Y-%m-%d %H:%M")
+    db.commit()
 
-    return {
-        "message": "Login successful", 
-        "user_id": user.user_id, 
-        "name": user.full_name, 
-        "role": user.role
-    }
+    log_event(db, "SUCCESS", "Auth", f"User logged in: {user.full_name}")
+    return {"message": "Login successful", "user_id": user.user_id, "name": user.full_name, "role": user.role}
 
 @app.get("/history/{user_id}")
 def get_history(user_id: int, db: Session = Depends(get_db)):
@@ -802,22 +808,67 @@ Context:
 
     return StreamingResponse(iter_tokens(), media_type="text/markdown")
 
+# --- REPLACE YOUR EXISTING health_check FUNCTION WITH THIS ---
 @app.get("/api/health")
-def health_check(db: Session = Depends(get_db)):
-    start_time = time.time()
+async def health_check(db: Session = Depends(get_db)):
+    start_total = time.time()
+    
+    # 1. Check Database
+    db_start = time.time()
     try:
         db.execute(text("SELECT 1"))
         db_status = "online"
     except Exception:
         db_status = "offline"
+    db_latency = round((time.time() - db_start) * 1000)
 
-    ai_status = "online" if 'model' in globals() and model is not None else "offline"
-    latency = round((time.time() - start_time) * 1000)
+    # 2. Check Vision Model (ConvNeXt)
+    # Checks if loaded in memory
+    vision_status = "online" if 'model' in globals() and model is not None else "offline"
+    
+    # 3. Check LLM (Qwen)
+    # Checks if loaded in memory
+    llm_status = "online" if 'llm' in globals() and llm is not None else "offline"
+
+    # 4. Check External APIs (Real Ping)
+    weather_status = "offline"
+    weather_lat = 0
+    geo_status = "offline"
+    geo_lat = 0
+
+    async with httpx.AsyncClient() as client:
+        # A. Weather API Ping
+        try:
+            w_start = time.time()
+            # Minimal request to Open-Meteo
+            await client.get("https://api.open-meteo.com/v1/forecast?latitude=0&longitude=0&current=temperature_2m", timeout=2.0)
+            weather_lat = round((time.time() - w_start) * 1000)
+            weather_status = "online"
+        except Exception:
+            weather_status = "offline"
+
+        # B. OpenStreetMap Ping
+        try:
+            g_start = time.time()
+            # Minimal request to Nominatim Status
+            await client.get("https://nominatim.openstreetmap.org/status.php", headers={"User-Agent": "TeaCare/1.0"}, timeout=2.0)
+            geo_lat = round((time.time() - g_start) * 1000)
+            geo_status = "online"
+        except Exception:
+            geo_status = "offline"
+
+    total_latency = round((time.time() - start_total) * 1000)
 
     return {
         "status": "healthy",
-        "api_latency": f"{latency}ms",
-        "services": { "database": db_status, "ai_engine": ai_status, "api": "online" },
+        "api_latency": f"{total_latency}ms",
+        "services": {
+            "database": {"status": db_status, "latency": f"{db_latency}ms"},
+            "vision_model": {"status": vision_status, "model_name": "ConvNeXt Tiny"},
+            "llm_model": {"status": llm_status, "model_name": "Qwen 0.5B"},
+            "weather_api": {"status": weather_status, "latency": f"{weather_lat}ms"},
+            "geo_api": {"status": geo_status, "latency": f"{geo_lat}ms"},
+        },
         "timestamp": datetime.now().isoformat()
     }
 
@@ -825,3 +876,54 @@ def health_check(db: Session = Depends(get_db)):
 def get_system_logs(limit: int = 10, db: Session = Depends(get_db)):
     logs = db.query(SystemLog).order_by(SystemLog.timestamp.desc()).limit(limit).all()
     return logs
+
+# --- USER MANAGEMENT ENDPOINTS ---
+
+# 1. Get All Users (for Admin Dashboard)
+@app.get("/api/users")
+def get_all_users(db: Session = Depends(get_db)):
+    # In a real app, add limit/offset for pagination
+    users = db.query(User).order_by(User.user_id.desc()).limit(100).all()
+    return users
+
+# 2. Update User Role (e.g., Promote Farmer -> Researcher)
+
+
+@app.put("/api/users/{user_id}/role")
+def update_user_role(user_id: int, role_data: RoleUpdate, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.user_id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    old_role = user.role
+    user.role = role_data.role
+    db.commit()
+    
+    log_event(db, "WARNING", "User Mgmt", f"Changed User {user_id} role from {old_role} to {user.role}")
+    return {"message": "Role updated"}
+
+# 3. Delete User
+@app.delete("/api/users/{user_id}")
+def delete_user(user_id: int, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.user_id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    db.delete(user)
+    db.commit()
+    
+    log_event(db, "WARNING", "User Mgmt", f"Deleted User ID {user_id} ({user.full_name})")
+    return {"message": "User deleted"}
+
+
+@app.put("/api/users/{user_id}/status")
+def update_user_status(user_id: int, status: StatusUpdate, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.user_id == user_id).first()
+    if not user: raise HTTPException(status_code=404, detail="User not found")
+    
+    user.is_active = status.is_active
+    db.commit()
+    
+    action = "Unbanned" if status.is_active else "Banned"
+    log_event(db, "WARNING", "User Mgmt", f"{action} User ID {user_id}")
+    return {"message": f"User {action}"}

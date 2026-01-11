@@ -1,6 +1,7 @@
 'use client';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
+import Cookies from 'js-cookie';
 import { 
   LayoutDashboard, 
   Users, 
@@ -8,7 +9,7 @@ import {
   BookOpen, 
   LogOut, 
   Sprout,
-  ScrollText // <--- Import this new icon
+  ScrollText 
 } from 'lucide-react';
 
 // Update the menu items array
@@ -22,6 +23,18 @@ const adminLinks = [
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
+
+const handleLogout = () => {
+    // Remove all session cookies
+    Cookies.remove('token');
+    Cookies.remove('role');
+    Cookies.remove('user_id');
+    Cookies.remove('user_name');
+
+    // Redirect to Login Page
+    router.push('/login');
+  };
 
   return (
     <div className="flex h-screen bg-slate-50">
@@ -62,7 +75,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         </nav>
 
         <div className="p-4 border-t border-slate-800">
-          <button className="flex items-center gap-3 w-full px-4 py-3 text-slate-400 hover:text-red-400 hover:bg-red-950/30 rounded-xl transition-all">
+          <button 
+              onClick={handleLogout}
+              className="flex items-center gap-3 w-full px-4 py-3 text-slate-400 hover:text-red-400 hover:bg-red-950/30 rounded-xl transition-all">
             <LogOut size={20} />
             <span className="font-medium text-sm">Sign Out</span>
           </button>
