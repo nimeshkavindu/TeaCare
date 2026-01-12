@@ -106,6 +106,14 @@ class ForumComment(Base):
     content = Column(String)
     timestamp = Column(String)
 
+class PostReport(Base):
+    __tablename__ = "post_reports"
+    report_id = Column(Integer, primary_key=True, index=True)
+    post_id = Column(Integer) 
+    user_id = Column(Integer) 
+    reason = Column(String)  
+    timestamp = Column(String)
+
 class DiseaseInfo(Base):
     __tablename__ = "diseases"
     disease_id = Column(Integer, primary_key=True)
@@ -249,8 +257,8 @@ model = None
 class_names = []
 
 try:
-    model = tf.keras.models.load_model('tea_leaf_convnext.keras')
-    with open('class_names.pkl', 'rb') as f:
+    model = tf.keras.models.load_model('models/tea_leaf_convnext.keras')
+    with open('models/class_names.pkl', 'rb') as f:
         class_names = pickle.load(f)
     print("✅ Model loaded successfully!")
     log_startup_event("SUCCESS", "AI Engine", "ConvNeXt Disease Model Loaded")
@@ -638,6 +646,81 @@ def add_comment(request: CommentRequest, db: Session = Depends(get_db)):
 @app.get("/posts/{post_id}/comments")
 def get_comments(post_id: int, db: Session = Depends(get_db)):
     return db.query(ForumComment).filter(ForumComment.post_id == post_id).all()
+
+# --- MODERATION ENDPOINTS ---
+
+# 1. User Reports a Post (Mobile App calls this)
+@app.post("/posts/{post_id}/report")
+def report_post(post_id: int, user_id: int = Form(...), reason: str = Form(...), db: Session = Depends(get_db)):
+    # Check if this user already reported this post to prevent spamming
+    existing = db.query(PostReport).filter(PostReport.post_id == post_id, PostReport.user_id == user_id).first()
+    if existing:
+        return {"message": "You have already reported this post."}
+
+    new_report = PostReport(
+        post_id=post_id, 
+        user_id=user_id, 
+        reason=reason, 
+        timestamp=datetime.now().strftime("%Y-%m-%d %H:%M")
+    )
+    db.add(new_report)
+    db.commit()
+    
+    log_event(db, "WARNING", "Forum", f"Post {post_id} reported by User {user_id}")
+    return {"message": "Report submitted"}
+
+# 2. Admin: Get All Reported Posts
+@app.get("/api/admin/reports")
+def get_reported_posts(db: Session = Depends(get_db)):
+    # Get all reports
+    reports = db.query(PostReport).all()
+    
+    # Group reports by Post ID
+    from collections import Counter
+    post_counts = Counter([r.post_id for r in reports])
+    
+    results = []
+    for pid, count in post_counts.items():
+        post = db.query(ForumPost).filter(ForumPost.post_id == pid).first()
+        if post:
+            # Get specific reasons for this post (limit to 3 for preview)
+            reasons = db.query(PostReport.reason).filter(PostReport.post_id == pid).limit(3).all()
+            reason_list = [r[0] for r in reasons]
+            
+            results.append({
+                "post": post,
+                "report_count": count,
+                "reasons": reason_list
+            })
+            
+    # Sort by number of reports (Highest first)
+    results.sort(key=lambda x: x['report_count'], reverse=True)
+    return results
+
+# 3. Admin: Delete a Post (and its reports/comments)
+@app.delete("/api/admin/posts/{post_id}")
+def delete_post_admin(post_id: int, db: Session = Depends(get_db)):
+    # Delete related data first (Cascade)
+    db.query(PostReport).filter(PostReport.post_id == post_id).delete()
+    db.query(ForumComment).filter(ForumComment.post_id == post_id).delete()
+    
+    # Delete the post
+    post = db.query(ForumPost).filter(ForumPost.post_id == post_id).first()
+    if post:
+        db.delete(post)
+        db.commit()
+        log_event(db, "WARNING", "Moderation", f"Admin DELETED Post {post_id} due to reports")
+        return {"message": "Post deleted"}
+    raise HTTPException(status_code=404, detail="Post not found")
+
+# 4. Admin: Ignore/Dismiss Reports (Keep post, clear reports)
+@app.post("/api/admin/posts/{post_id}/dismiss")
+def dismiss_reports(post_id: int, db: Session = Depends(get_db)):
+    db.query(PostReport).filter(PostReport.post_id == post_id).delete()
+    db.commit()
+    log_event(db, "INFO", "Moderation", f"Reports dismissed for Post {post_id}")
+    return {"message": "Reports cleared"}
+
 
 # --- AI ENGINE ---
 print("Loading LLM...")
