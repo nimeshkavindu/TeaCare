@@ -3,7 +3,7 @@ import 'dart:io';
 import 'treatment_screen.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'package:latlong2/latlong.dart'; 
+import 'package:latlong2/latlong.dart';
 import 'location_picker_screen.dart';
 
 class DiagnosisScreen extends StatefulWidget {
@@ -33,6 +33,7 @@ class DiagnosisScreen extends StatefulWidget {
 class _DiagnosisScreenState extends State<DiagnosisScreen> {
   // Update with your IP
   final String baseUrl = "http://192.168.8.122:8000";
+  final TextEditingController _feedbackController = TextEditingController();
 
   void _markLocation() async {
     final LatLng? result = await Navigator.push(
@@ -73,11 +74,31 @@ class _DiagnosisScreenState extends State<DiagnosisScreen> {
   }
 
   void _reportIncorrect() {
+    _feedbackController.clear(); // Clear previous text
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text("Help us improve"),
-        content: const Text("What is the correct disease?"),
+        // Changed content to include a TextField
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text("What is the correct disease?"),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _feedbackController,
+              decoration: const InputDecoration(
+                hintText: "e.g. Blister Blight",
+                border: OutlineInputBorder(),
+                contentPadding: EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+              ),
+            ),
+          ],
+        ),
         actions: [
           TextButton(
             child: const Text("Cancel"),
@@ -85,7 +106,12 @@ class _DiagnosisScreenState extends State<DiagnosisScreen> {
           ),
           TextButton(
             child: const Text("Submit"),
-            onPressed: () => _sendFeedback("Corrected by User"),
+            onPressed: () {
+              // Send the actual text entered by the user
+              if (_feedbackController.text.trim().isNotEmpty) {
+                _sendFeedback(_feedbackController.text.trim());
+              }
+            },
           ),
         ],
       ),
@@ -502,5 +528,11 @@ class _DiagnosisScreenState extends State<DiagnosisScreen> {
         ],
       ),
     );
+  }
+
+  @override
+  void dispose() {
+    _feedbackController.dispose();
+    super.dispose();
   }
 }

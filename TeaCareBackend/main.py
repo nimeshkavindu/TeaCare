@@ -91,11 +91,22 @@ class ForumPost(Base):
     post_id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer)
     author_name = Column(String)
+    author_role = Column(String, default="Farmer") 
     title = Column(String)
     content = Column(String)
+    category = Column(String, default="General")   
     image_url = Column(String, nullable=True)
     timestamp = Column(String)
-    likes = Column(Integer, default=0) 
+    score = Column(Integer, default=0) 
+    views = Column(Integer, default=0) 
+    comment_count = Column(Integer, default=0) 
+
+class PostVote(Base):
+    __tablename__ = "post_votes"
+    vote_id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer)
+    post_id = Column(Integer)
+    vote_type = Column(Integer) 
 
 class ForumComment(Base):
     __tablename__ = "forum_comments"
@@ -584,15 +595,22 @@ async def get_weather_alert(lat: float = 6.9271, lng: float = 79.8612, db: Sessi
         }
 
 # --- COMMUNITY FORUM ENDPOINTS ---
+# 1. Create Post (Now with Category & Role)
 @app.post("/posts")
 def create_post(
     user_id: int = Form(...),
     author_name: str = Form(...),
     title: str = Form(...),
     content: str = Form(...),
+    category: str = Form("General"), # NEW
     file: UploadFile = File(None), 
     db: Session = Depends(get_db)
 ):
+    # 1. Get User Role for Badge
+    user = db.query(User).filter(User.user_id == user_id).first()
+    role = user.role if user else "Farmer"
+
+    # 2. Handle Image
     image_path = None
     if file:
         ext = os.path.splitext(file.filename)[1]
@@ -601,32 +619,109 @@ def create_post(
             shutil.copyfileobj(file.file, buffer)
         image_path = file_location
 
+    # 3. Save
     new_post = ForumPost(
         user_id=user_id,
         author_name=author_name,
+        author_role=role,
         title=title,
         content=content,
+        category=category,
         image_url=image_path, 
-        timestamp=datetime.now().strftime("%Y-%m-%d %H:%M")
+        timestamp=datetime.now().strftime("%Y-%m-%d %H:%M"),
+        score=0,
+        views=0,
+        comment_count=0
     )
     db.add(new_post)
     db.commit()
     
-    log_event(db, "SUCCESS", "Forum", f"New Post ID {new_post.post_id} by User {user_id}")
-    return {"message": "Post created successfully"}
+    log_event(db, "SUCCESS", "Forum", f"New {category} post by {author_name}")
+    return {"message": "Post created"}
 
+# 2. Get Posts (With Filters: Popular, Newest, Unanswered, My Posts)
 @app.get("/posts")
-def get_posts(db: Session = Depends(get_db)):
-    posts = db.query(ForumPost).order_by(ForumPost.post_id.desc()).all()
-    return posts
+def get_posts(
+    sort: str = "newest",     # newest, popular
+    filter_by: str = "all",   # all, unanswered, my_posts
+    search: str = "",         # Search text
+    user_id: int = None,      # Required if filter_by = my_posts
+    db: Session = Depends(get_db)
+):
+    query = db.query(ForumPost)
 
-@app.post("/posts/{post_id}/like")
-def like_post(post_id: int, db: Session = Depends(get_db)):
+    # A. Apply Search
+    if search:
+        search_term = f"%{search}%"
+        query = query.filter(or_(ForumPost.title.ilike(search_term), ForumPost.content.ilike(search_term)))
+
+    # B. Apply Filters
+    if filter_by == "unanswered":
+        query = query.filter(ForumPost.comment_count == 0)
+    elif filter_by == "my_posts" and user_id:
+        query = query.filter(ForumPost.user_id == user_id)
+    elif filter_by == "category_alert":
+        query = query.filter(ForumPost.category == "Disease Alert")
+
+    # C. Apply Sorting
+    if sort == "popular":
+        query = query.order_by(ForumPost.score.desc())
+    else:
+        query = query.order_by(ForumPost.post_id.desc()) # Default: Newest
+
+    posts = query.all()
+    
+    # D. Attach Vote Status (Did *this* user vote on these posts?)
+    # If user_id is provided, we check their vote history
+    results = []
+    for p in posts:
+        user_vote = 0
+        if user_id:
+            vote_record = db.query(PostVote).filter(PostVote.post_id == p.post_id, PostVote.user_id == user_id).first()
+            if vote_record:
+                user_vote = vote_record.vote_type
+        
+        post_dict = p.__dict__.copy()
+        if "_sa_instance_state" in post_dict: del post_dict["_sa_instance_state"]
+        
+        post_dict['user_vote'] = user_vote # 1, -1, or 0
+        results.append(post_dict)
+
+    return results
+
+class VoteRequest(BaseModel):
+    user_id: int
+    vote_type: int # 1 (Up), -1 (Down), 0 (Remove Vote)
+
+@app.post("/posts/{post_id}/vote")
+def vote_post(post_id: int, vote: VoteRequest, db: Session = Depends(get_db)):
     post = db.query(ForumPost).filter(ForumPost.post_id == post_id).first()
     if not post: raise HTTPException(status_code=404, detail="Post not found")
-    post.likes += 1
+
+    # Check existing vote
+    existing_vote = db.query(PostVote).filter(PostVote.post_id == post_id, PostVote.user_id == vote.user_id).first()
+
+    if existing_vote:
+        # If user is changing vote (e.g. Up -> Down)
+        # Remove old value from score
+        post.score -= existing_vote.vote_type
+        
+        if vote.vote_type == 0:
+            # Removing vote completely
+            db.delete(existing_vote)
+        else:
+            # Updating vote
+            existing_vote.vote_type = vote.vote_type
+            post.score += vote.vote_type
+    else:
+        # New Vote
+        if vote.vote_type != 0:
+            new_vote = PostVote(user_id=vote.user_id, post_id=post_id, vote_type=vote.vote_type)
+            db.add(new_vote)
+            post.score += vote.vote_type
+
     db.commit()
-    return {"likes": post.likes}
+    return {"new_score": post.score}
 
 @app.post("/comments")
 def add_comment(request: CommentRequest, db: Session = Depends(get_db)):
@@ -646,6 +741,25 @@ def add_comment(request: CommentRequest, db: Session = Depends(get_db)):
 @app.get("/posts/{post_id}/comments")
 def get_comments(post_id: int, db: Session = Depends(get_db)):
     return db.query(ForumComment).filter(ForumComment.post_id == post_id).all()
+
+# 4. User: Delete Own Post
+@app.delete("/posts/{post_id}")
+def delete_own_post(post_id: int, user_id: int, db: Session = Depends(get_db)):
+    post = db.query(ForumPost).filter(ForumPost.post_id == post_id).first()
+    if not post: raise HTTPException(status_code=404, detail="Post not found")
+
+    # Security Check
+    if post.user_id != user_id:
+        raise HTTPException(status_code=403, detail="You can only delete your own posts")
+
+    # Cleanup
+    db.query(PostVote).filter(PostVote.post_id == post_id).delete()
+    db.query(ForumComment).filter(ForumComment.post_id == post_id).delete()
+    db.query(PostReport).filter(PostReport.post_id == post_id).delete()
+    
+    db.delete(post)
+    db.commit()
+    return {"message": "Post deleted"}
 
 # --- MODERATION ENDPOINTS ---
 
