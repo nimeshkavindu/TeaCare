@@ -9,7 +9,9 @@ import {
   BookOpen, 
   LogOut, 
   Sprout,
-  ScrollText 
+  ScrollText,
+  Bot,
+  ClipboardList
 } from 'lucide-react';
 
 // Update the menu items array
@@ -18,7 +20,9 @@ const adminLinks = [
   { href: '/admin/users', label: 'User Management', icon: Users },
   { href: '/admin/moderation', label: 'Forum Moderation', icon: ShieldAlert },
   { href: '/admin/knowledge', label: 'Knowledge Base', icon: BookOpen },
-  { href: '/admin/logs', label: 'Activity Logs', icon: ScrollText }, // <--- Added this line
+  { href: '/admin/logs', label: 'Activity Logs', icon: ScrollText }, 
+  { href: '/admin/rag', label: 'Chatbot Training', icon: Bot },
+  { href: '/admin/reports', label: 'Disease Reports', icon: ClipboardList },
 ];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {

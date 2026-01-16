@@ -1,10 +1,10 @@
 from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, validator
-from sqlalchemy import create_engine, Column, Integer, String, Float, or_, text, DateTime, Boolean
+from sqlalchemy import create_engine, Column, Integer, String, Float, or_, text, DateTime, Boolean, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.dialects import postgresql
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.orm import sessionmaker, Session, relationship, joinedload
 from passlib.context import CryptContext
 import shutil
 import os
@@ -26,6 +26,10 @@ from pypdf import PdfReader
 from fastapi.middleware.cors import CORSMiddleware
 import time
 import uuid
+from typing import List, Optional
+from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy import func
+from collections import Counter
 
 # --- DATABASE CONFIG ---
 SQLALCHEMY_DATABASE_URL = "postgresql://postgres:admin123@localhost/teacare_db"
@@ -85,6 +89,10 @@ class DiseaseReport(Base):
     longitude = Column(Float, nullable=True)
     is_correct = Column(String, default="Unknown") 
     user_correction = Column(String, nullable=True)
+    verification_status = Column(String, default="Pending") 
+    expert_correction = Column(String, nullable=True)    
+
+    recommendations = relationship("ExpertRecommendation", back_populates="report", cascade="all, delete-orphan")
 
 class ForumPost(Base):
     __tablename__ = "forum_posts"
@@ -128,18 +136,36 @@ class PostReport(Base):
 class DiseaseInfo(Base):
     __tablename__ = "diseases"
     disease_id = Column(Integer, primary_key=True)
-    name = Column(String)
-    symptoms = Column(postgresql.ARRAY(String)) 
-    causes = Column(postgresql.ARRAY(String))
+    name = Column(String, unique=True)
+    symptoms = Column(ARRAY(String))
+    causes = Column(ARRAY(String))
+    
+    treatments = relationship("Treatment", back_populates="disease", cascade="all, delete-orphan")
 
+class ExpertRecommendation(Base):
+    __tablename__ = "expert_recommendations"
+    recommendation_id = Column(Integer, primary_key=True, index=True)
+    report_id = Column(Integer, ForeignKey("disease_reports.report_id"))
+    expert_id = Column(Integer, ForeignKey("users.user_id")) 
+    expert_name = Column(String)
+    suggested_disease = Column(String)
+    notes = Column(String) 
+    timestamp = Column(String)
+
+    # Relationship back to Report
+    report = relationship("DiseaseReport", back_populates="recommendations")
+
+# 2. Add Treatment Class (if not already there)
 class Treatment(Base):
     __tablename__ = "treatments"
-    treatment_id = Column(Integer, primary_key=True)
-    disease_id = Column(Integer)
-    type = Column(String)
-    title = Column(String)
-    instruction = Column(String)
-    safety_tip = Column(String)
+    treatment_id = Column(Integer, primary_key=True, index=True)
+    disease_id = Column(Integer, ForeignKey("diseases.disease_id"))
+    type = Column(String)        # "Organic" or "Chemical"
+    title = Column(String)       
+    instruction = Column(String) 
+    safety_tip = Column(String)  
+    
+    disease = relationship("DiseaseInfo", back_populates="treatments")
 
 class SystemLog(Base):
     __tablename__ = "system_logs"
@@ -148,6 +174,7 @@ class SystemLog(Base):
     message = Column(String)
     source = Column(String) # e.g., "Auth", "AI Engine", "Database"
     timestamp = Column(DateTime, default=datetime.now)
+    
 
 class StatusUpdate(BaseModel):
     is_active: bool
@@ -354,6 +381,16 @@ async def predict_disease(
                 causes = []
                 treatment_list = []
 
+
+        initial_status = "Pending"
+
+        # Rule 1: If AI is super sure (>90%) AND it's a common disease, Auto-Verify it.
+        if confidence > 85.0 and disease_name != "Unknown / Unclear":
+            initial_status = "Auto-Verified"
+
+        # Rule 2: If the result is "Unknown", always force human review
+        if disease_name == "Unknown / Unclear":
+            initial_status = "Pending"
         
         # 7. Save Report
         new_report = DiseaseReport(
@@ -361,7 +398,8 @@ async def predict_disease(
             disease_name=disease_name,
             confidence=f"{confidence:.1f}%",
             image_url=file_location,
-            timestamp=datetime.now().strftime("%Y-%m-%d %H:%M")
+            timestamp=datetime.now().strftime("%Y-%m-%d %H:%M"),
+            verification_status=initial_status
         )
         db.add(new_report)
         db.commit()
@@ -413,15 +451,14 @@ def submit_feedback(report_id: int, feedback: FeedbackRequest, db: Session = Dep
         raise HTTPException(status_code=404, detail="Report not found")
 
     report.is_correct = "Yes" if feedback.is_correct else "No"
+    
     if not feedback.is_correct:
         report.user_correction = feedback.correct_disease
+
+        report.verification_status = "Pending" 
+        log_event(db, "WARNING", "Triage", f"Report #{report_id} FLAGGED by User Feedback (User Disagreed)")
     
     db.commit()
-    
-    # --- LOG FEEDBACK ---
-    status = "Correct" if feedback.is_correct else f"Incorrect (User said: {feedback.correct_disease})"
-    log_event(db, "INFO", "Feedback", f"Report #{report_id} marked as {status}")
-    
     return {"message": "Feedback received"}
 
 # --- REGISTER ---
@@ -642,37 +679,38 @@ def create_post(
 # 2. Get Posts (With Filters: Popular, Newest, Unanswered, My Posts)
 @app.get("/posts")
 def get_posts(
-    sort: str = "newest",     # newest, popular
-    filter_by: str = "all",   # all, unanswered, my_posts
-    search: str = "",         # Search text
-    user_id: int = None,      # Required if filter_by = my_posts
+    sort: str = "newest",
+    filter_by: str = "all",
+    search: str = "",
+    user_id: int = None,
     db: Session = Depends(get_db)
 ):
     query = db.query(ForumPost)
 
-    # A. Apply Search
+    # A. Search
     if search:
         search_term = f"%{search}%"
         query = query.filter(or_(ForumPost.title.ilike(search_term), ForumPost.content.ilike(search_term)))
 
-    # B. Apply Filters
+    # B. Filters
     if filter_by == "unanswered":
-        query = query.filter(ForumPost.comment_count == 0)
+        # We handle this filter effectively by checking the real count later or doing a join here
+        # For simplicity in this fix, let's filter after counting or assume the column will be updated
+        pass 
     elif filter_by == "my_posts" and user_id:
         query = query.filter(ForumPost.user_id == user_id)
     elif filter_by == "category_alert":
         query = query.filter(ForumPost.category == "Disease Alert")
 
-    # C. Apply Sorting
+    # C. Sorting
     if sort == "popular":
         query = query.order_by(ForumPost.score.desc())
     else:
-        query = query.order_by(ForumPost.post_id.desc()) # Default: Newest
+        query = query.order_by(ForumPost.post_id.desc())
 
     posts = query.all()
     
-    # D. Attach Vote Status (Did *this* user vote on these posts?)
-    # If user_id is provided, we check their vote history
+    # D. Attach Vote Status AND Real Comment Count
     results = []
     for p in posts:
         user_vote = 0
@@ -681,10 +719,19 @@ def get_posts(
             if vote_record:
                 user_vote = vote_record.vote_type
         
+        # --- FIX: Count comments directly from the database ---
+        real_comment_count = db.query(ForumComment).filter(ForumComment.post_id == p.post_id).count()
+
         post_dict = p.__dict__.copy()
         if "_sa_instance_state" in post_dict: del post_dict["_sa_instance_state"]
         
-        post_dict['user_vote'] = user_vote # 1, -1, or 0
+        post_dict['user_vote'] = user_vote
+        post_dict['comment_count'] = real_comment_count # <--- Forces correct number
+        
+        # Handle "Unanswered" filter logic manually if needed
+        if filter_by == "unanswered" and real_comment_count > 0:
+            continue
+
         results.append(post_dict)
 
     return results
@@ -724,18 +771,23 @@ def vote_post(post_id: int, vote: VoteRequest, db: Session = Depends(get_db)):
     return {"new_score": post.score}
 
 @app.post("/comments")
-def add_comment(request: CommentRequest, db: Session = Depends(get_db)):
+def create_comment(comment: CommentRequest, db: Session = Depends(get_db)):
+    # 1. Create Comment
     new_comment = ForumComment(
-        post_id=request.post_id,
-        user_id=request.user_id,
-        author_name=request.author_name,
-        content=request.content,
+        post_id=comment.post_id,
+        user_id=comment.user_id,
+        author_name=comment.author_name,
+        content=comment.content,
         timestamp=datetime.now().strftime("%Y-%m-%d %H:%M")
     )
     db.add(new_comment)
-    db.commit()
     
-    log_event(db, "SUCCESS", "Forum", f"Comment added to Post {request.post_id} by {request.author_name}")
+    # 2. Update Post Count
+    post = db.query(ForumPost).filter(ForumPost.post_id == comment.post_id).first()
+    if post:
+        post.comment_count += 1 
+        
+    db.commit()
     return {"message": "Comment added"}
 
 @app.get("/posts/{post_id}/comments")
@@ -760,6 +812,27 @@ def delete_own_post(post_id: int, user_id: int, db: Session = Depends(get_db)):
     db.delete(post)
     db.commit()
     return {"message": "Post deleted"}
+
+# --- GET SINGLE POST (For Deep Linking) ---
+@app.get("/posts/{post_id}")
+def get_single_post(post_id: int, user_id: int = None, db: Session = Depends(get_db)):
+    post = db.query(ForumPost).filter(ForumPost.post_id == post_id).first()
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+    
+    # Calculate Vote Status
+    user_vote = 0
+    if user_id:
+        vote_record = db.query(PostVote).filter(PostVote.post_id == post_id, PostVote.user_id == user_id).first()
+        if vote_record:
+            user_vote = vote_record.vote_type
+
+    # Convert to Dict
+    post_dict = post.__dict__.copy()
+    if "_sa_instance_state" in post_dict: del post_dict["_sa_instance_state"]
+    post_dict['user_vote'] = user_vote
+    
+    return post_dict
 
 # --- MODERATION ENDPOINTS ---
 
@@ -1124,3 +1197,198 @@ def update_user_status(user_id: int, status: StatusUpdate, db: Session = Depends
     action = "Unbanned" if status.is_active else "Banned"
     log_event(db, "WARNING", "User Mgmt", f"{action} User ID {user_id}")
     return {"message": f"User {action}"}
+
+# --- KNOWLEDGE BASE ENDPOINTS (For Arrays) ---
+
+# Pydantic Model (Data Validation)
+class TreatmentDTO(BaseModel):
+    type: str
+    title: str
+    instruction: str
+    safety_tip: str
+
+class DiseaseRequest(BaseModel):
+    name: str
+    symptoms: List[str]
+    causes: List[str]
+    treatments: List[TreatmentDTO]  
+
+
+@app.get("/api/diseases")
+def get_all_diseases(db: Session = Depends(get_db)):
+    # usage of 'joinedload' forces the DB to fetch treatments immediately
+    return db.query(DiseaseInfo).options(joinedload(DiseaseInfo.treatments)).all()
+
+@app.post("/api/admin/diseases")
+def save_disease_info(data: DiseaseRequest, db: Session = Depends(get_db)):
+    # 1. Check if Disease exists
+    disease = db.query(DiseaseInfo).filter(DiseaseInfo.name == data.name).first()
+    
+    if not disease:
+        disease = DiseaseInfo(name=data.name)
+        db.add(disease)
+        db.commit() # Commit to get an ID
+        db.refresh(disease)
+
+    # 2. Update Basic Info
+    disease.symptoms = data.symptoms
+    disease.causes = data.causes
+    
+    # 3. Update Treatments (Strategy: Delete old, add new)
+    # This is the easiest way to ensure we don't have duplicates or stale data
+    db.query(Treatment).filter(Treatment.disease_id == disease.disease_id).delete()
+    
+    for t in data.treatments:
+        new_treatment = Treatment(
+            disease_id=disease.disease_id,
+            type=t.type,
+            title=t.title,
+            instruction=t.instruction,
+            safety_tip=t.safety_tip
+        )
+        db.add(new_treatment)
+    
+    db.commit()
+    return {"message": "Disease and treatments saved successfully"}
+
+@app.delete("/api/admin/diseases/{id}")
+def delete_disease_info(id: int, db: Session = Depends(get_db)):
+    # Cascade delete will handle treatments automatically
+    db.query(DiseaseInfo).filter(DiseaseInfo.disease_id == id).delete()
+    db.commit()
+    return {"message": "Deleted"}
+
+# --- ADMIN REPORT TRIAGE ENDPOINTS ---
+
+# 1. Get Reports (With Filters for Triage)
+@app.get("/api/admin/reports_triage")
+def get_reports_triage(filter_by: str = "all", db: Session = Depends(get_db)):
+    # Add .options(joinedload(...)) to fetch recommendations efficiently
+    query = db.query(DiseaseReport).options(joinedload(DiseaseReport.recommendations))
+    
+    if filter_by == "pending":
+        query = query.filter(DiseaseReport.verification_status == "Pending")
+    elif filter_by == "conflict":
+        query = query.filter(DiseaseReport.is_correct == "No")
+    elif filter_by == "high_risk":
+        query = query.filter(or_(
+            DiseaseReport.disease_name == "Blister Blight", 
+            DiseaseReport.disease_name == "Tea Mosaic Virus"
+        ))
+
+    return query.order_by(DiseaseReport.report_id.desc()).limit(100).all()
+
+# 2. Verify or Correct a Report
+class TriageUpdate(BaseModel):
+    status: str            # "Verified" or "Corrected"
+    expert_correction: Optional[str] = None
+
+@app.patch("/api/admin/reports/{report_id}/triage")
+def triage_report(report_id: int, data: TriageUpdate, db: Session = Depends(get_db)):
+    report = db.query(DiseaseReport).filter(DiseaseReport.report_id == report_id).first()
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    
+    report.verification_status = data.status
+    report.expert_correction = data.expert_correction
+    db.commit()
+    
+    # Log it
+    log_event(db, "INFO", "Triage", f"Report #{report_id} marked as {data.status}")
+    return {"message": "Report status updated"}
+
+# --- EXPERT RECOMMENDATION ENDPOINTS ---
+
+class RecommendationRequest(BaseModel):
+    expert_id: int
+    expert_name: str
+    suggested_disease: str
+    notes: str
+
+# 1. Experts: Submit a Recommendation
+@app.post("/api/reports/{report_id}/recommend")
+def submit_recommendation(report_id: int, rec: RecommendationRequest, db: Session = Depends(get_db)):
+    # Verify User is actually an Expert/Researcher
+    user = db.query(User).filter(User.user_id == rec.expert_id).first()
+    if not user or user.role not in ["Expert", "Researcher", "Admin"]:
+        raise HTTPException(status_code=403, detail="Only Experts can submit recommendations")
+
+    new_rec = ExpertRecommendation(
+        report_id=report_id,
+        expert_id=rec.expert_id,
+        expert_name=rec.expert_name,
+        suggested_disease=rec.suggested_disease,
+        notes=rec.notes,
+        timestamp=datetime.now().strftime("%Y-%m-%d %H:%M")
+    )
+    db.add(new_rec)
+    
+    # Optional: Update status to "Under Review" since an expert looked at it
+    report = db.query(DiseaseReport).filter(DiseaseReport.report_id == report_id).first()
+    if report.verification_status == "Pending":
+        report.verification_status = "Under Review"
+        
+    db.commit()
+    return {"message": "Recommendation submitted"}
+
+# 2. Admin: Get Recommendations for a Report
+@app.get("/api/reports/{report_id}/recommendations")
+def get_recommendations(report_id: int, db: Session = Depends(get_db)):
+    return db.query(ExpertRecommendation).filter(ExpertRecommendation.report_id == report_id).all()
+
+# -- Stats --
+
+@app.get("/api/admin/stats")
+def get_admin_stats(db: Session = Depends(get_db)):
+    # 1. Basic Counts
+    total_users = db.query(User).count()
+    total_reports = db.query(DiseaseReport).count()
+    pending_reviews = db.query(DiseaseReport).filter(DiseaseReport.verification_status == "Pending").count()
+
+    # 2. Disease Distribution (Pie Chart)
+    # Get top 5 most frequent diseases
+    distribution = db.query(DiseaseReport.disease_name, func.count(DiseaseReport.disease_name))\
+        .group_by(DiseaseReport.disease_name)\
+        .order_by(func.count(DiseaseReport.disease_name).desc())\
+        .limit(5).all()
+    
+    dist_data = [{"name": d[0], "value": d[1]} for d in distribution]
+
+    # 3. Trends (Last 7 Days)
+    # Fetch timestamps for all reports
+    all_reports = db.query(DiseaseReport.timestamp).all()
+    
+    # Extract just the date part (YYYY-MM-DD) from the timestamp string
+    dates = []
+    for r in all_reports:
+        try:
+            # Assuming format "YYYY-MM-DD HH:MM"
+            dates.append(r[0].split(" ")[0])
+        except:
+            continue
+            
+    date_counts = Counter(dates)
+    sorted_dates = sorted(date_counts.keys())[-7:] # Keep only last 7 days
+    trend_data = [{"date": d, "reports": date_counts[d]} for d in sorted_dates]
+
+    # 4. AI Accuracy Calculation
+    # Consider reports where is_correct is strictly "Yes" or "No"
+    verified_reports = db.query(DiseaseReport).filter(
+        DiseaseReport.is_correct.in_(["Yes", "No"])
+    ).all()
+
+    total_verified = len(verified_reports)
+    accuracy_rate = 0
+    if total_verified > 0:
+        correct_count = sum(1 for r in verified_reports if r.is_correct == "Yes")
+        accuracy_rate = round((correct_count / total_verified) * 100, 1)
+
+    return {
+        "total_users": total_users,
+        "total_reports": total_reports,
+        "pending_reviews": pending_reviews,
+        "distribution": dist_data,
+        "trends": trend_data,
+        "ai_accuracy": accuracy_rate,
+        "feedback_count": total_verified
+    }
