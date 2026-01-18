@@ -30,6 +30,14 @@ from typing import List, Optional
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy import func
 from collections import Counter
+from datetime import datetime, timedelta
+from dateutil.parser import parse
+import cv2
+from scipy.stats import entropy
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
+from reportlab.lib import colors
+from fastapi.responses import FileResponse
 
 # --- DATABASE CONFIG ---
 SQLALCHEMY_DATABASE_URL = "postgresql://postgres:admin123@localhost/teacare_db"
@@ -1339,56 +1347,485 @@ def get_recommendations(report_id: int, db: Session = Depends(get_db)):
 # -- Stats --
 
 @app.get("/api/admin/stats")
-def get_admin_stats(db: Session = Depends(get_db)):
-    # 1. Basic Counts
+def get_admin_stats(time_range: str = "7d", db: Session = Depends(get_db)):
+    # 1. Global Counts (These ALWAYS stay "All Time" for the top cards)
     total_users = db.query(User).count()
     total_reports = db.query(DiseaseReport).count()
     pending_reviews = db.query(DiseaseReport).filter(DiseaseReport.verification_status == "Pending").count()
 
-    # 2. Disease Distribution (Pie Chart)
-    # Get top 5 most frequent diseases
-    distribution = db.query(DiseaseReport.disease_name, func.count(DiseaseReport.disease_name))\
-        .group_by(DiseaseReport.disease_name)\
-        .order_by(func.count(DiseaseReport.disease_name).desc())\
-        .limit(5).all()
+    role_counts_query = db.query(User.role, func.count(User.user_id)).group_by(User.role).all()
     
-    dist_data = [{"name": d[0], "value": d[1]} for d in distribution]
+    role_breakdown = {r[0].capitalize(): r[1] for r in role_counts_query if r[0]}
 
-    # 3. Trends (Last 7 Days)
-    # Fetch timestamps for all reports
-    all_reports = db.query(DiseaseReport.timestamp).all()
+    # 2. Determine Cutoff Date
+    now = datetime.now()
+    if time_range == "7d":
+        cutoff_date = now - timedelta(days=7)
+        group_by_format = "%Y-%m-%d" # Daily
+    elif time_range == "30d":
+        cutoff_date = now - timedelta(days=30)
+        group_by_format = "%Y-%m-%d" # Daily
+    elif time_range == "6m":
+        cutoff_date = now - timedelta(days=180)
+        group_by_format = "%Y-%m"    # Monthly
+    elif time_range == "1y":
+        cutoff_date = now - timedelta(days=365)
+        group_by_format = "%Y-%m"    # Monthly
+    else:
+        cutoff_date = now - timedelta(days=7)
+        group_by_format = "%Y-%m-%d"
+
+    # 3. Fetch All & Filter in Python
+    # (Since timestamp is a String, we fetch all and filter in memory)
+    all_reports = db.query(DiseaseReport).all()
     
-    # Extract just the date part (YYYY-MM-DD) from the timestamp string
-    dates = []
+    filtered_dates = []
+    disease_counts = Counter()
+    
+    # Track accuracy ONLY for the filtered period
+    filtered_verified_count = 0
+    filtered_correct_count = 0
+
     for r in all_reports:
         try:
-            # Assuming format "YYYY-MM-DD HH:MM"
-            dates.append(r[0].split(" ")[0])
-        except:
-            continue
+            # Parse timestamp
+            r_date = datetime.strptime(r.timestamp, "%Y-%m-%d %H:%M")
             
-    date_counts = Counter(dates)
-    sorted_dates = sorted(date_counts.keys())[-7:] # Keep only last 7 days
-    trend_data = [{"date": d, "reports": date_counts[d]} for d in sorted_dates]
+            # --- APPLY TIME FILTER ---
+            if r_date >= cutoff_date:
+                # A. For Trends
+                date_key = r_date.strftime(group_by_format)
+                filtered_dates.append(date_key)
+                
+                # B. For Distribution
+                disease_counts[r.disease_name] += 1
+                
+                # C. For Accuracy (Only count this report if it's inside the date range)
+                if r.is_correct in ["Yes", "No"]:
+                    filtered_verified_count += 1
+                    if r.is_correct == "Yes":
+                        filtered_correct_count += 1
 
-    # 4. AI Accuracy Calculation
-    # Consider reports where is_correct is strictly "Yes" or "No"
-    verified_reports = db.query(DiseaseReport).filter(
-        DiseaseReport.is_correct.in_(["Yes", "No"])
-    ).all()
+        except Exception:
+            continue
 
-    total_verified = len(verified_reports)
+    # 4. Finalize Trends
+    date_counter = Counter(filtered_dates)
+    sorted_keys = sorted(date_counter.keys())
+    trend_data = [{"date": k, "reports": date_counter[k]} for k in sorted_keys]
+
+    # 5. Finalize Distribution (Top 5 for THIS PERIOD)
+    top_diseases = disease_counts.most_common(5)
+    dist_data = [{"name": name, "value": count} for name, count in top_diseases]
+
+    # 6. Finalize Accuracy (For THIS PERIOD)
     accuracy_rate = 0
-    if total_verified > 0:
-        correct_count = sum(1 for r in verified_reports if r.is_correct == "Yes")
-        accuracy_rate = round((correct_count / total_verified) * 100, 1)
+    if filtered_verified_count > 0:
+        accuracy_rate = round((filtered_correct_count / filtered_verified_count) * 100, 1)
 
     return {
         "total_users": total_users,
+        "role_breakdown": role_breakdown,
         "total_reports": total_reports,
         "pending_reviews": pending_reviews,
         "distribution": dist_data,
         "trends": trend_data,
         "ai_accuracy": accuracy_rate,
-        "feedback_count": total_verified
+        "feedback_count": filtered_verified_count
     }
+
+# Add this endpoint to main.py
+@app.get("/api/researcher/stats")
+def get_researcher_stats(db: Session = Depends(get_db)):
+    # 1. Total Samples (Dataset Size)
+    total_samples = db.query(DiseaseReport).count()
+
+    # 2. Pending Validations (Workload)
+    pending_validations = db.query(DiseaseReport).filter(
+        DiseaseReport.verification_status == "Pending"
+    ).count()
+
+    # 3. Analyze Reports for Research Metrics
+    all_reports = db.query(DiseaseReport).all()
+    uncertainty_count = 0
+    disease_counts = Counter()
+
+    for r in all_reports:
+        # Count disease types
+        disease_counts[r.disease_name] += 1
+
+        # Count low confidence (Uncertainty Flags)
+        try:
+            # Clean string "98.5%" -> 98.5
+            conf_val = float(r.confidence.replace("%", ""))
+            if conf_val < 75.0:
+                uncertainty_count += 1
+        except:
+            continue
+
+    # 4. Determine Dominant Strain
+    dominant_disease = "None"
+    if disease_counts:
+        # Get the most common disease
+        most_common = disease_counts.most_common(1)[0]
+        dominant_disease = most_common[0]
+
+    return {
+        "total_samples": total_samples,
+        "pending_validations": pending_validations,
+        "uncertainty_flags": uncertainty_count,
+        "dominant_disease": dominant_disease  
+    }
+
+# --- HELPER: COMPUTER VISION FORENSICS ---
+def analyze_lesions_advanced(image_path):
+    try:
+        # 1. Load & Preprocess
+        img = cv2.imread(image_path)
+        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+        # 2. VEGETATION INDEX (Green Leaf Index - GLI)
+        # GLI = (2G - R - B) / (2G + R + B)
+        # We calculate the mean GLI for the whole leaf
+        R, G, B = cv2.split(img_rgb)
+        # Avoid division by zero
+        denom = (2.0 * G + R + B) + 0.00001
+        gli_matrix = (2.0 * G - R - B) / denom
+        avg_gli = np.mean(gli_matrix)
+
+        # 3. TEXTURE ANALYSIS (Entropy & Contrast)
+        # Entropy = measure of randomness (high for fungal textures)
+        # Contrast = measure of local intensity variation
+        from skimage.feature import graycomatrix, graycoprops
+        # Calculate GLCM (Gray Level Co-occurrence Matrix)
+        # We downscale slightly for speed if needed, but 224x224 is fast enough
+        glcm = graycomatrix(gray, distances=[1], angles=[0], levels=256, symmetric=True, normed=True)
+        texture_contrast = graycoprops(glcm, 'contrast')[0, 0]
+        texture_homogeneity = graycoprops(glcm, 'homogeneity')[0, 0]
+        
+        # 4. MORPHOLOGY (Lesion Shapes)
+        # Mask for disease (same logic as before)
+        lower_green = np.array([35, 40, 40])
+        upper_green = np.array([85, 255, 255])
+        green_mask = cv2.inRange(hsv, lower_green, upper_green)
+        _, thresh = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY_INV)
+        disease_mask = cv2.bitwise_and(thresh, cv2.bitwise_not(green_mask))
+        
+        # Find contours of spots
+        contours, _ = cv2.findContours(disease_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        lesion_count = len(contours)
+        avg_circularity = 0
+        avg_area = 0
+        
+        valid_spots = 0
+        for cnt in contours:
+            area = cv2.contourArea(cnt)
+            if area > 10: # Ignore tiny noise
+                perimeter = cv2.arcLength(cnt, True)
+                if perimeter > 0:
+                    # Circularity = 4 * pi * Area / (Perimeter^2)
+                    # 1.0 = Perfect Circle, < 0.5 = Irregular/Splotchy
+                    circularity = (4 * np.pi * area) / (perimeter * perimeter)
+                    avg_circularity += circularity
+                    avg_area += area
+                    valid_spots += 1
+        
+        if valid_spots > 0:
+            avg_circularity /= valid_spots
+            avg_area /= valid_spots
+
+        # 5. Generate Heatmap (Same as before)
+        heatmap = img.copy()
+        heatmap[disease_mask > 0] = [0, 0, 255] # Red BGR
+        blended = cv2.addWeighted(img, 0.7, heatmap, 0.3, 0)
+        filename = os.path.basename(image_path)
+        heatmap_path = f"uploads/heatmap_{filename}"
+        cv2.imwrite(heatmap_path, blended)
+
+        return {
+            "gli_index": round(avg_gli, 3),          # Green Leaf Index (-1 to 1)
+            "texture_contrast": round(texture_contrast, 1), # High = Rough
+            "texture_homogeneity": round(texture_homogeneity, 2), # High = Smooth
+            "lesion_count": lesion_count,
+            "avg_spot_area_px": round(avg_area, 0),
+            "avg_circularity": round(avg_circularity, 2), # 1.0 = Circle
+            "heatmap_url": heatmap_path,
+            "severity": round((cv2.countNonZero(disease_mask)/cv2.countNonZero(thresh))*100, 2) if cv2.countNonZero(thresh) > 0 else 0
+        }
+
+    except Exception as e:
+        print(f"CV Error: {e}")
+        return {} # Return empty if fails
+
+# --- UPDATE: /predict/advanced ENDPOINT ---
+# --- CORRECTED ENDPOINT ---
+@app.post("/predict/advanced")
+async def predict_advanced(
+    user_id: int = Form(...),
+    file: UploadFile = File(...), 
+    db: Session = Depends(get_db)
+):
+    if model is None:
+        raise HTTPException(status_code=503, detail="AI Model is offline")
+
+    try:
+        # 1. Read & Save Original
+        contents = await file.read()
+        ext = os.path.splitext(file.filename)[1]
+        file_location = f"uploads/{uuid.uuid4()}{ext}"
+        
+        # Ensure uploads directory exists
+        os.makedirs("uploads", exist_ok=True) 
+        
+        with open(file_location, "wb") as buffer:
+            buffer.write(contents)
+
+        # 2. RUN AI MODEL (Classification)
+        image = Image.open(io.BytesIO(contents)).convert('RGB')
+        image = image.resize((224, 224))
+        img_array = np.asarray(image)
+        batch = np.array([img_array])
+
+        predictions = model.predict(batch)
+        scores = tf.nn.softmax(predictions[0]).numpy()
+        
+        class_probs = []
+        for i, score in enumerate(scores):
+            # FIX: Clean the name to remove numbering (e.g., "3. Gray Blight" -> "Gray Blight")
+            raw_name = class_names[i]
+            clean_name = raw_name
+            
+            # Check if name starts with a number followed by a dot and space (e.g. "3. ")
+            if ". " in raw_name and raw_name.split(". ")[0].isdigit():
+                clean_name = raw_name.split(". ", 1)[1]
+
+            class_probs.append({
+                "disease": clean_name, 
+                "probability": float(score) * 100
+            })
+            
+        class_probs.sort(key=lambda x: x["probability"], reverse=True)
+        top_result = class_probs[0]
+
+        # 3. RUN COMPUTER VISION (Quantification)
+        # FIX: Calling the correct function 'analyze_lesions_advanced'
+        cv_metrics = analyze_lesions_advanced(file_location)
+
+        # FIX: Check if analysis failed (returned empty dict)
+        if not cv_metrics:
+            # Fallback values if CV fails
+            cv_metrics = {
+                "severity": 0,
+                "lesion_count": 0,
+                "heatmap_url": "",
+                "gli_index": 0,
+                "texture_contrast": 0,
+                "texture_homogeneity": 0,
+                "avg_circularity": 0,
+                "avg_spot_area_px": 0
+            }
+
+        # 4. Save Report
+        new_report = DiseaseReport(
+            user_id=user_id,
+            disease_name=top_result["disease"], # This will now save the clean name to DB
+            confidence=f"{top_result['probability']:.1f}%",
+            image_url=file_location,
+            timestamp=datetime.now().strftime("%Y-%m-%d %H:%M"),
+            verification_status="Pending"
+        )
+        db.add(new_report)
+        db.commit()
+
+        # 5. Return Advanced Data
+        return {
+            "report_id": new_report.report_id,
+            "top_diagnosis": top_result,
+            "full_spectrum": class_probs[:5],
+            "image_url": file_location,
+            "telemetry": cv_metrics,
+            
+            # Scientific Metrics (Safe Access)
+            "severity_metrics": {
+                "score": cv_metrics.get("severity", 0),
+                "lesion_count": cv_metrics.get("lesion_count", 0),
+                "heatmap_url": cv_metrics.get("heatmap_url", "")
+            }
+        }
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc() # This prints the REAL error to your terminal
+        print(f"Advanced Scan Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- UPDATE: EXPORT SCIENTIFIC REPORT (With Confusion & Telemetry) ---
+@app.get("/api/reports/{report_id}/export")
+def export_report_pdf(report_id: int, db: Session = Depends(get_db)):
+    report = db.query(DiseaseReport).filter(DiseaseReport.report_id == report_id).first()
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+
+    # 1. Re-calculate Advanced CV Metrics (The "Bio-Optical" Data)
+    # Uses the advanced function we created earlier
+    cv_metrics = analyze_lesions_advanced(report.image_url)
+    
+    # 2. Re-run AI Inference (To get Confusion/Confidence Spectrum)
+    # We need to load the image and run it through the model again to get the full probability list
+    confusion_spectrum = []
+    try:
+        if model:
+            # Load and Preprocess
+            img = Image.open(report.image_url).convert('RGB')
+            img = img.resize((224, 224))
+            img_array = np.asarray(img)
+            batch = np.array([img_array])
+
+            # Predict
+            predictions = model.predict(batch)
+            scores = tf.nn.softmax(predictions[0]).numpy()
+            
+            # Map to classes
+            class_probs = []
+            for i, score in enumerate(scores):
+                class_probs.append({"name": class_names[i], "prob": float(score) * 100})
+            
+            # Sort and take Top 5
+            class_probs.sort(key=lambda x: x["prob"], reverse=True)
+            confusion_spectrum = class_probs[:5]
+    except Exception as e:
+        print(f"AI Re-inference failed: {e}")
+
+    # 3. Generate PDF
+    pdf_filename = f"uploads/Report_{report_id}.pdf"
+    c = canvas.Canvas(pdf_filename, pagesize=letter)
+    width, height = letter
+
+    # --- HEADER ---
+    c.setFont("Helvetica-Bold", 20)
+    c.drawString(50, height - 50, "TeaCare Digital Pathology Report")
+    
+    c.setFont("Helvetica", 10)
+    c.setFillColor(colors.gray)
+    c.drawString(50, height - 70, "Automated diagnostics generated by TeaCare Research Engine v2.0")
+    c.setFillColor(colors.black)
+
+    c.setFont("Helvetica", 12)
+    c.drawString(50, height - 100, f"Report ID: #{report_id}")
+    c.drawString(50, height - 120, f"Date: {report.timestamp}")
+    c.drawString(300, height - 100, f"Analyst ID: {report.user_id}")
+    c.drawString(300, height - 120, f"Location: {report.latitude}, {report.longitude}")
+
+    c.setStrokeColor(colors.indigo)
+    c.setLineWidth(2)
+    c.line(50, height - 140, 550, height - 140)
+
+    # --- SECTION 1: PRIMARY DIAGNOSIS ---
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(50, height - 170, "1. Primary Diagnosis")
+    
+    # Box for result
+    c.setStrokeColor(colors.black)
+    c.setLineWidth(1)
+    c.rect(50, height - 230, 500, 50, stroke=1, fill=0)
+    
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(70, height - 200, f"{report.disease_name}")
+    
+    c.setFont("Helvetica-Bold", 14)
+    c.drawRightString(530, height - 200, f"{report.confidence}")
+    c.setFont("Helvetica", 10)
+    c.drawRightString(530, height - 215, "Confidence Score")
+
+    # --- SECTION 2: AI CONFUSION SPECTRUM (New!) ---
+    y_pos = height - 270
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(50, y_pos, "2. AI Confusion Spectrum")
+    y_pos -= 25
+    
+    c.setFont("Helvetica", 10)
+    c.drawString(50, y_pos, "Top 5 Candidate Diseases (Probability Distribution):")
+    y_pos -= 20
+
+    for item in confusion_spectrum:
+        # Draw Bar Background
+        c.setFillColor(colors.whitesmoke)
+        c.rect(150, y_pos - 8, 300, 10, fill=1, stroke=0)
+        
+        # Draw Bar Foreground (Probability)
+        bar_width = (item["prob"] / 100) * 300
+        if item["name"] == report.disease_name:
+            c.setFillColor(colors.indigo) # Winner is Indigo
+        else:
+            c.setFillColor(colors.gray)   # Others are Gray
+            
+        c.rect(150, y_pos - 8, bar_width, 10, fill=1, stroke=0)
+        
+        # Text Labels
+        c.setFillColor(colors.black)
+        c.drawString(50, y_pos, f"{item['name']}")
+        c.drawString(460, y_pos, f"{item['prob']:.1f}%")
+        
+        y_pos -= 20
+
+    # --- SECTION 3: BIO-OPTICAL TELEMETRY (New Data!) ---
+    y_pos -= 20
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(50, y_pos, "3. Bio-Optical Telemetry")
+    y_pos -= 30
+
+    # Create a grid for metrics
+    # Row 1: Infection Stats
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(60, y_pos, "Infection Severity")
+    c.drawString(200, y_pos, "Lesion Count")
+    c.drawString(340, y_pos, "Avg Spot Size")
+    
+    c.setFont("Helvetica", 12)
+    c.drawString(60, y_pos - 15, f"{cv_metrics.get('severity', 0)}%")
+    c.drawString(200, y_pos - 15, f"{cv_metrics.get('lesion_count', 0)}")
+    c.drawString(340, y_pos - 15, f"{cv_metrics.get('avg_spot_area_px', 0)} px")
+
+    y_pos -= 40
+    
+    # Row 2: Advanced Morphology
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(60, y_pos, "Green Leaf Index (GLI)")
+    c.drawString(200, y_pos, "Texture (Contrast)")
+    c.drawString(340, y_pos, "Circularity (0-1)")
+    
+    c.setFont("Helvetica", 12)
+    c.drawString(60, y_pos - 15, f"{cv_metrics.get('gli_index', 'N/A')}")
+    c.drawString(200, y_pos - 15, f"{cv_metrics.get('texture_contrast', 'N/A')}")
+    c.drawString(340, y_pos - 15, f"{cv_metrics.get('avg_circularity', 'N/A')}")
+
+    # --- SECTION 4: VISUAL EVIDENCE ---
+    y_pos -= 60
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(50, y_pos, "4. Visual Evidence")
+    
+    try:
+        # Draw Original
+        c.drawImage(report.image_url, 50, y_pos - 220, width=200, height=200, preserveAspectRatio=True)
+        c.setFont("Helvetica", 10)
+        c.drawString(50, y_pos - 235, "Fig A: Original Specimen")
+        
+        # Draw Heatmap (if available)
+        if 'heatmap_url' in cv_metrics and os.path.exists(cv_metrics['heatmap_url']):
+            c.drawImage(cv_metrics['heatmap_url'], 300, y_pos - 220, width=200, height=200, preserveAspectRatio=True)
+            c.drawString(300, y_pos - 235, "Fig B: Computer Vision Heatmap")
+    except Exception as e:
+        print(f"PDF Image Error: {e}")
+
+    # --- FOOTER ---
+    c.setFont("Helvetica-Oblique", 8)
+    c.drawString(50, 30, f"Generated automatically by TeaCare System on {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    c.drawRightString(550, 30, "Page 1 of 1")
+
+    c.save()
+    
+    return FileResponse(pdf_filename, media_type='application/pdf', filename=f"TeaCare_Report_{report_id}.pdf")

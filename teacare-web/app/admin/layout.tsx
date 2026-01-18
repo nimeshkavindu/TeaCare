@@ -3,7 +3,8 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import Cookies from 'js-cookie';
 import { 
-  LayoutDashboard, 
+  LayoutDashboard,
+  BarChart3, 
   Users, 
   ShieldAlert, 
   BookOpen, 
@@ -17,6 +18,7 @@ import {
 // Update the menu items array
 const adminLinks = [
   { href: '/admin', label: 'System Health', icon: LayoutDashboard },
+  { href: '/admin/analytics', label: 'Analytics', icon: BarChart3 },
   { href: '/admin/users', label: 'User Management', icon: Users },
   { href: '/admin/moderation', label: 'Forum Moderation', icon: ShieldAlert },
   { href: '/admin/knowledge', label: 'Knowledge Base', icon: BookOpen },
