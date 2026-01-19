@@ -38,6 +38,12 @@ from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from reportlab.lib import colors
 from fastapi.responses import FileResponse
+import reverse_geocoder as rg 
+import pycountry 
+from datetime import timedelta
+import random
+import math
+from sqlalchemy import distinct
 
 # --- DATABASE CONFIG ---
 SQLALCHEMY_DATABASE_URL = "postgresql://postgres:admin123@localhost/teacare_db"
@@ -1829,3 +1835,400 @@ def export_report_pdf(report_id: int, db: Session = Depends(get_db)):
     c.save()
     
     return FileResponse(pdf_filename, media_type='application/pdf', filename=f"TeaCare_Report_{report_id}.pdf")
+
+# 2. DYNAMIC FILTER ENDPOINT (Keep as is)
+# ==========================================
+def get_country_name(code):
+    try:
+        return pycountry.countries.get(alpha_2=code).name
+    except:
+        return code 
+
+@app.get("/api/analytics/filters")
+def get_dynamic_filters(db: Session = Depends(get_db)):
+    try:
+        unique_diseases = db.query(DiseaseReport.disease_name).distinct().all()
+        diseases = sorted([d[0] for d in unique_diseases if d[0]])
+
+        coords_raw = db.query(DiseaseReport.latitude, DiseaseReport.longitude).filter(
+            DiseaseReport.latitude.isnot(None), 
+            DiseaseReport.longitude.isnot(None)
+        ).all()
+
+        unique_coords = list(set([(float(c[0]), float(c[1])) for c in coords_raw if c[0] and c[1]]))
+        locations = {} 
+        
+        if unique_coords:
+            results = rg.search(unique_coords)
+            for res in results:
+                cc = res.get('cc', 'Unknown')
+                country_name = get_country_name(cc)
+                region = res.get('admin1', 'Unknown') 
+                
+                if country_name not in locations:
+                    locations[country_name] = set()
+                locations[country_name].add(region)
+
+        formatted_locations = {k: sorted(list(v)) for k, v in locations.items()}
+        return {"diseases": diseases, "locations": formatted_locations}
+    except Exception as e:
+        return {"diseases": [], "locations": {}}
+
+
+# ==========================================
+# 3. TEMPORAL ANALYTICS (Fixed Type Mismatch)
+# ==========================================
+@app.get("/api/analytics/temporal")
+def get_temporal_analytics(
+    start_date: Optional[str] = None, 
+    end_date: Optional[str] = None,
+    country: Optional[str] = "All",
+    region: Optional[str] = "All", 
+    disease: Optional[str] = "All",
+    db: Session = Depends(get_db)
+):
+    # --- 1. Date Logic ---
+    try:
+        if start_date and end_date:
+            s_dt = datetime.strptime(start_date, "%Y-%m-%d")
+            e_dt = datetime.strptime(end_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
+        else:
+            e_dt = datetime.now()
+            s_dt = e_dt - timedelta(days=30)
+            
+        # FIX: Convert to String for Database Comparison
+        # Your DB stores timestamps as "YYYY-MM-DD HH:MM", so we must compare strings.
+        s_str = s_dt.strftime("%Y-%m-%d %H:%M")
+        e_str = e_dt.strftime("%Y-%m-%d %H:%M")
+        
+    except ValueError:
+        # Fallback
+        e_dt = datetime.now()
+        s_dt = e_dt - timedelta(days=30)
+        s_str = s_dt.strftime("%Y-%m-%d %H:%M")
+        e_str = e_dt.strftime("%Y-%m-%d %H:%M")
+    
+    # --- 2. Query Data ---
+    # FIX: Use string variables (s_str, e_str) instead of datetime objects
+    query = db.query(DiseaseReport).filter(
+        DiseaseReport.timestamp >= s_str,
+        DiseaseReport.timestamp <= e_str
+    )
+    
+    if disease and disease != "All":
+        query = query.filter(DiseaseReport.disease_name == disease)
+
+    all_reports = query.all()
+    filtered_reports = []
+
+    # --- 3. Dynamic Geo-Filtering ---
+    if (country and country != "All") or (region and region != "All"):
+        valid_reports = []
+        coords_to_check = []
+        for r in all_reports:
+            if r.latitude and r.longitude:
+                try:
+                    coords_to_check.append((float(r.latitude), float(r.longitude)))
+                    valid_reports.append(r)
+                except: continue
+        
+        if coords_to_check:
+            geo_results = rg.search(coords_to_check)
+            for idx, geo in enumerate(geo_results):
+                r_country = get_country_name(geo.get('cc'))
+                r_region = geo.get('admin1')
+                country_match = (country == "All") or (r_country == country)
+                region_match = (region == "All") or (r_region == region)
+                if country_match and region_match:
+                    filtered_reports.append(valid_reports[idx])
+    else:
+        filtered_reports = all_reports
+
+    # --- 4. Data Aggregation ---
+    data_map = {}
+    composition_map = {}
+    disease_totals = {} 
+    seasonality_map = {i: 0 for i in range(1, 13)}
+    
+    # Fill Timeline
+    current = s_dt
+    while current <= e_dt:
+        key = current.strftime("%Y-%m-%d")
+        data_map[key] = { "date": key, "disease_count": 0 }
+        composition_map[key] = { "date": key }
+        current += timedelta(days=1)
+
+    for r in filtered_reports:
+        try:
+            # Handle variable timestamp formats safely
+            ts_str = str(r.timestamp)
+            if "T" in ts_str: dt = datetime.strptime(ts_str.split(".")[0], "%Y-%m-%dT%H:%M:%S")
+            else: dt = datetime.strptime(ts_str[:16], "%Y-%m-%d %H:%M")
+            
+            d_key = dt.strftime("%Y-%m-%d")
+            d_name = r.disease_name
+            
+            if d_key in data_map:
+                data_map[d_key]["disease_count"] += 1
+                composition_map[d_key][d_name] = composition_map[d_key].get(d_name, 0) + 1
+                disease_totals[d_name] = disease_totals.get(d_name, 0) + 1
+                seasonality_map[dt.month] += 1
+        except Exception as e: 
+            print(f"Skipping row: {e}")
+            continue
+
+    # Fill zeros
+    all_diseases = list(disease_totals.keys())
+    for day in composition_map.values():
+        for d in all_diseases:
+            if d not in day: day[d] = 0
+
+    timeline = sorted(data_map.values(), key=lambda x: x['date'])
+    composition_timeline = sorted(composition_map.values(), key=lambda x: x['date'])
+
+    # --- 5. Statistics ---
+    counts = [t["disease_count"] for t in timeline]
+    
+    # Trend
+    trend = []
+    window = 3
+    for i in range(len(counts)):
+        s = max(0, i - window + 1)
+        chunk = counts[s : i + 1]
+        trend.append(round(sum(chunk) / len(chunk), 2))
+
+    # Anomalies
+    anomalies = []
+    if len(counts) > 0:
+        mean = sum(counts) / len(counts)
+        variance = sum([((x - mean) ** 2) for x in counts]) / len(counts)
+        std_dev = variance ** 0.5
+        threshold = mean + (1.5 * std_dev)
+        for t in timeline:
+            if t["disease_count"] > threshold and t["disease_count"] > 0:
+                anomalies.append(t)
+
+    # Forecast
+    forecast = []
+    if counts:
+        last_avg = sum(counts[-5:]) / 5 if len(counts) >= 5 else counts[-1]
+        momentum = (counts[-1] - counts[0]) / len(counts) if len(counts) > 1 else 0
+        for i in range(1, 8):
+            f_date = (e_dt + timedelta(days=i)).strftime("%Y-%m-%d")
+            val = max(0, last_avg + (momentum * i) + random.uniform(-0.5, 0.5))
+            forecast.append({
+                "date": f_date,
+                "predicted": round(val, 1),
+                "confidence_high": round(val * 1.25, 1)
+            })
+
+    # Seasonal Profile
+    month_names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    seasonal_profile = [{"month": month_names[i-1], "cases": seasonality_map[i]} for i in range(1, 13)]
+
+    # Growth Rate
+    mid = len(counts) // 2
+    first_half = sum(counts[:mid])
+    last_half = sum(counts[mid:])
+    growth_rate = 0
+    if first_half > 0:
+        growth_rate = ((last_half - first_half) / first_half) * 100
+
+    return {
+        "timeline": timeline,
+        "composition": composition_timeline,
+        "disease_breakdown": [{"name": k, "value": v} for k, v in disease_totals.items()],
+        "trend_line": trend,
+        "forecast": forecast,
+        "anomalies": anomalies,
+        "seasonality": seasonal_profile,
+        "statistics": {
+            "total_cases": sum(counts),
+            "peak_day": max(counts) if counts else 0,
+            "growth_rate": round(growth_rate, 1),
+            "active_region": region if region != "All" else country,
+            "anomaly_count": len(anomalies)
+        }
+    }
+
+# ==========================================
+# 5. RAW DATA EXPORT ENDPOINT (New)
+# ==========================================
+import csv 
+from fastapi.responses import StreamingResponse
+
+@app.get("/api/analytics/export")
+def export_raw_data(
+    start_date: Optional[str] = None, 
+    end_date: Optional[str] = None,
+    country: Optional[str] = "All",
+    region: Optional[str] = "All", 
+    disease: Optional[str] = "All",
+    db: Session = Depends(get_db)
+):
+    # 1. Date Logic (Same as Analytics)
+    try:
+        if start_date and end_date:
+            s_dt = datetime.strptime(start_date, "%Y-%m-%d")
+            e_dt = datetime.strptime(end_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
+        else:
+            e_dt = datetime.now()
+            s_dt = e_dt - timedelta(days=30)
+        s_str = s_dt.strftime("%Y-%m-%d %H:%M")
+        e_str = e_dt.strftime("%Y-%m-%d %H:%M")
+    except ValueError:
+        return HTTPException(status_code=400, detail="Invalid date format")
+
+    # 2. Base Query
+    query = db.query(DiseaseReport).filter(
+        DiseaseReport.timestamp >= s_str,
+        DiseaseReport.timestamp <= e_str
+    )
+    if disease and disease != "All":
+        query = query.filter(DiseaseReport.disease_name == disease)
+
+    all_reports = query.all()
+    export_rows = []
+
+    # 3. Geo-Enrichment & Filtering
+    # We want to export the DETECTED Region/Country, not just Lat/Lon
+    valid_reports = []
+    coords_to_check = []
+    
+    for r in all_reports:
+        if r.latitude and r.longitude:
+            try:
+                coords_to_check.append((float(r.latitude), float(r.longitude)))
+                valid_reports.append(r)
+            except: continue
+    
+    if coords_to_check:
+        geo_results = rg.search(coords_to_check)
+        
+        for idx, geo in enumerate(geo_results):
+            r = valid_reports[idx]
+            
+            # Resolve Names
+            r_country_code = geo.get('cc', 'Unknown')
+            r_country = get_country_name(r_country_code)
+            r_region = geo.get('admin1', 'Unknown')
+            r_city = geo.get('name', 'Unknown')
+
+            # Apply Filter
+            country_match = (country == "All") or (r_country == country)
+            region_match = (region == "All") or (r_region == region)
+            
+            if country_match and region_match:
+                # Add to Export List
+                export_rows.append([
+                    r.report_id,
+                    r.timestamp,
+                    r.disease_name,
+                    r.confidence,
+                    r.latitude,
+                    r.longitude,
+                    r_city,
+                    r_region,
+                    r_country,
+                    r.user_id
+                ])
+
+    # 4. Generate CSV Stream
+    output = io.StringIO()
+    writer = csv.writer(output)
+    
+    # Headers
+    writer.writerow([
+        "Report ID", "Timestamp", "Disease", "AI Confidence", 
+        "Latitude", "Longitude", "Detected City", "Detected Region", "Detected Country", 
+        "User ID"
+    ])
+    
+    # Rows
+    writer.writerows(export_rows)
+    
+    output.seek(0)
+    
+    filename = f"teacare_export_{start_date}_to_{end_date}.csv"
+    return StreamingResponse(
+        iter([output.getvalue()]), 
+        media_type="text/csv", 
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+
+# ==========================================
+# 6. GEO-SPATIAL MAP ENDPOINT
+# ==========================================
+@app.get("/api/analytics/map")
+def get_map_data(
+    start_date: Optional[str] = None, 
+    end_date: Optional[str] = None,
+    country: Optional[str] = "All",
+    region: Optional[str] = "All", 
+    disease: Optional[str] = "All",
+    db: Session = Depends(get_db)
+):
+    # 1. Date Logic (Same as before)
+    try:
+        if start_date and end_date:
+            s_dt = datetime.strptime(start_date, "%Y-%m-%d")
+            e_dt = datetime.strptime(end_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
+        else:
+            e_dt = datetime.now()
+            s_dt = e_dt - timedelta(days=30)
+        s_str = s_dt.strftime("%Y-%m-%d %H:%M")
+        e_str = e_dt.strftime("%Y-%m-%d %H:%M")
+    except ValueError:
+        return []
+
+    # 2. Base Query (Only fetch valid coords)
+    query = db.query(DiseaseReport).filter(
+        DiseaseReport.timestamp >= s_str,
+        DiseaseReport.timestamp <= e_str,
+        DiseaseReport.latitude.isnot(None),
+        DiseaseReport.longitude.isnot(None)
+    )
+    
+    if disease and disease != "All":
+        query = query.filter(DiseaseReport.disease_name == disease)
+
+    reports = query.all()
+    map_points = []
+
+    # 3. Geo-Filtering (Batch Processing)
+    coords_to_check = []
+    valid_reports = []
+    
+    for r in reports:
+        try:
+            coords_to_check.append((float(r.latitude), float(r.longitude)))
+            valid_reports.append(r)
+        except: continue
+
+    if coords_to_check:
+        geo_results = rg.search(coords_to_check)
+        
+        for idx, geo in enumerate(geo_results):
+            r = valid_reports[idx]
+            
+            # Resolve Location
+            r_country = get_country_name(geo.get('cc'))
+            r_region = geo.get('admin1')
+            
+            # Apply Filter
+            country_match = (country == "All") or (r_country == country)
+            region_match = (region == "All") or (r_region == region)
+            
+            if country_match and region_match:
+                map_points.append({
+                    "id": r.report_id,
+                    "lat": float(r.latitude),
+                    "lng": float(r.longitude),
+                    "disease": r.disease_name,
+                    "confidence": r.confidence,
+                    "date": str(r.timestamp).split(" ")[0],
+                    "location": f"{geo.get('name')}, {r_region}"
+                })
+
+    return map_points
