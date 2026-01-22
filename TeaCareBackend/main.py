@@ -188,6 +188,20 @@ class SystemLog(Base):
     message = Column(String)
     source = Column(String) # e.g., "Auth", "AI Engine", "Database"
     timestamp = Column(DateTime, default=datetime.now)
+
+class KnowledgeBase(Base):
+    __tablename__ = "knowledge_base"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String)            # Common Name (e.g., Blister Blight)
+    scientific_name = Column(String) # (e.g., Exobasidium vexans)
+    description = Column(String)
+    symptoms = Column(String)
+    prevention = Column(String)
+    treatment = Column(String)
+    image_url = Column(String)       # Reference Image
+    status = Column(String, default="Pending") # Pending, Approved, Rejected
+    submitted_by = Column(String)    # Researcher Name
+    timestamp = Column(DateTime, default=datetime.now)
     
 
 class StatusUpdate(BaseModel):
@@ -1324,7 +1338,7 @@ class RecommendationRequest(BaseModel):
 def submit_recommendation(report_id: int, rec: RecommendationRequest, db: Session = Depends(get_db)):
     # Verify User is actually an Expert/Researcher
     user = db.query(User).filter(User.user_id == rec.expert_id).first()
-    if not user or user.role not in ["Expert", "Researcher", "Admin"]:
+    if not user or user.role not in ["expert", "researcher", "admin"]:
         raise HTTPException(status_code=403, detail="Only Experts can submit recommendations")
 
     new_rec = ExpertRecommendation(
@@ -2228,7 +2242,106 @@ def get_map_data(
                     "disease": r.disease_name,
                     "confidence": r.confidence,
                     "date": str(r.timestamp).split(" ")[0],
-                    "location": f"{geo.get('name')}, {r_region}"
+                    "location": f"{geo.get('name')}, {r_region}",
+                    "image_url": r.image_url  # <--- ADD THIS LINE
                 })
 
     return map_points
+
+# --- SCHEMAS ---
+class KnowledgeBaseRequest(BaseModel):
+    name: str
+    scientific_name: str
+    description: str
+    symptoms: str
+    prevention: str
+    treatment: str
+    submitted_by: str
+
+# --- ENDPOINTS ---
+
+# 1. Get Library (Researchers see ALL, Farmers see Approved only)
+@app.get("/api/library")
+def get_library(status: str = "all", db: Session = Depends(get_db)):
+    query = db.query(KnowledgeBase)
+    if status == "approved":
+        query = query.filter(KnowledgeBase.status == "Approved")
+    return query.order_by(KnowledgeBase.id.desc()).all()
+
+# 2. Submit New Pathogen (Researcher)
+@app.post("/api/library")
+def submit_pathogen(
+    name: str = Form(...),
+    scientific_name: str = Form(...),
+    description: str = Form(...),
+    symptoms: str = Form(...),
+    prevention: str = Form(...),
+    treatment: str = Form(...),
+    submitted_by: str = Form(...),
+    file: UploadFile = File(None),
+    db: Session = Depends(get_db)
+):
+    # Handle Image Upload
+    file_path = None
+    if file:
+        # FIX: Ensure we use the 'uploads' directory which exists and is mounted
+        # Also clean the filename to prevent spaces/issues
+        import uuid
+        ext = os.path.splitext(file.filename)[1]
+        filename = f"library_{uuid.uuid4()}{ext}"
+        file_location = f"uploads/{filename}"
+        
+        with open(file_location, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        
+        file_path = file_location
+
+    new_entry = KnowledgeBase(
+        name=name,
+        scientific_name=scientific_name,
+        description=description,
+        symptoms=symptoms,
+        prevention=prevention,
+        treatment=treatment,
+        submitted_by=submitted_by,
+        image_url=file_path,
+        status="Pending" # Default to Pending
+    )
+    db.add(new_entry)
+    db.commit()
+    return {"message": "Pathogen submitted for approval"}
+
+# --- ADMIN LIBRARY MANAGEMENT ---
+
+class LibraryStatusUpdate(BaseModel):
+    status: str  # "Approved" or "Rejected"
+
+@app.patch("/api/admin/library/{id}/status")
+def update_library_status(id: int, data: LibraryStatusUpdate, db: Session = Depends(get_db)):
+    entry = db.query(KnowledgeBase).filter(KnowledgeBase.id == id).first()
+    if not entry:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    
+    entry.status = data.status
+    db.commit()
+    
+    log_event(db, "INFO", "Library", f"Admin set Entry #{id} ({entry.name}) to {data.status}")
+    return {"message": f"Entry {data.status}"}
+
+@app.delete("/api/admin/library/{id}")
+def delete_library_entry(id: int, db: Session = Depends(get_db)):
+    entry = db.query(KnowledgeBase).filter(KnowledgeBase.id == id).first()
+    if not entry:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    
+    # Optional: Delete the image file from disk to save space
+    if entry.image_url and os.path.exists(entry.image_url):
+        try:
+            os.remove(entry.image_url)
+        except:
+            pass
+
+    db.delete(entry)
+    db.commit()
+    log_event(db, "WARNING", "Library", f"Admin DELETED Entry #{id} ({entry.name})")
+    return {"message": "Entry deleted"}

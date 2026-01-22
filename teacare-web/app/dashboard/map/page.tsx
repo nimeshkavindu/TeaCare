@@ -1,15 +1,13 @@
 'use client';
 import { useEffect, useState, useMemo } from 'react';
 import dynamic from 'next/dynamic'; 
-import { Map as MapIcon, Filter, Globe, MapPin, FlaskConical, RefreshCw, Calendar, Download } from 'lucide-react';
+import { Map as MapIcon, Filter, Globe, MapPin, FlaskConical, RefreshCw, Calendar, Download, X, Info } from 'lucide-react';
 
-// Dynamic Import
 const EpidemiologyMap = dynamic(() => import('@/components/EpidemiologyMap'), { 
   ssr: false,
   loading: () => <div className="h-full w-full bg-slate-100 animate-pulse rounded-2xl flex items-center justify-center text-slate-400">Loading Cartography...</div>
 });
 
-// Scientific Color Palette
 const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4'];
 
 export default function MapPage() {
@@ -19,6 +17,9 @@ export default function MapPage() {
   const [selectedRegion, setSelectedRegion] = useState('All');
   const [selectedDisease, setSelectedDisease] = useState('All');
   
+  // NEW: State for selected report
+  const [selectedReport, setSelectedReport] = useState<any>(null);
+
   const [filterOptions, setFilterOptions] = useState<any>({ locations: {}, diseases: [] });
   const [mapData, setMapData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -54,7 +55,6 @@ export default function MapPage() {
       });
   }, [startDate, endDate, selectedCountry, selectedRegion, selectedDisease]);
 
-  // 3. Generate Color Map (Ensures consistency between Legend and Map)
   const diseaseColorMap = useMemo(() => {
     const map: { [key: string]: string } = {};
     filterOptions.diseases.forEach((d: string, index: number) => {
@@ -69,7 +69,7 @@ export default function MapPage() {
     : ['All'];
 
   return (
-    <div className="flex flex-col h-[calc(100vh-100px)] gap-6 pb-6">
+    <div className="flex flex-col h-[calc(100vh-100px)] gap-4 pb-6">
       
       {/* Header & Controls */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 shrink-0">
@@ -121,35 +121,100 @@ export default function MapPage() {
       </div>
 
       {/* Map Container */}
-      <div className="flex-1 bg-white rounded-2xl border border-slate-200 shadow-inner relative overflow-hidden">
-        {/* Pass the dynamic color map to the component */}
-        <EpidemiologyMap data={mapData} colorMap={diseaseColorMap} />
+      <div className="flex-1 bg-white rounded-2xl border border-slate-200 shadow-inner relative overflow-hidden flex flex-col">
         
-        {/* Dynamic Legend Overlay */}
-        <div className="absolute bottom-6 left-6 bg-white/90 backdrop-blur-sm p-4 rounded-xl border border-slate-200 shadow-lg z-[1000] text-xs max-h-48 overflow-y-auto">
-            <h4 className="font-bold text-slate-700 mb-2 flex items-center gap-2">
-                <FlaskConical size={12} className="text-slate-400" /> Pathogen Key
-            </h4>
+        {/* The Map itself takes all available space */}
+        <div className="flex-1 relative">
+            <EpidemiologyMap 
+                data={mapData} 
+                colorMap={diseaseColorMap} 
+                onSelectReport={setSelectedReport} 
+            />
             
-            <div className="space-y-2">
-                {/* Dynamically Map over available diseases */}
-                {filterOptions.diseases.map((d: string) => (
-                    <div key={d} className="flex items-center gap-2">
-                        <span 
-                            className="w-2.5 h-2.5 rounded-full shadow-sm" 
-                            style={{ backgroundColor: diseaseColorMap[d] || '#ccc' }}
-                        ></span> 
-                        <span className="text-slate-600 font-medium">{d}</span>
+            {/* Legend Overlay (Hidden if detail panel is open on small screens) */}
+            {!selectedReport && (
+                <div className="absolute bottom-6 left-6 bg-white/90 backdrop-blur-sm p-4 rounded-xl border border-slate-200 shadow-lg z-[1000] text-xs max-h-48 overflow-y-auto">
+                    <h4 className="font-bold text-slate-700 mb-2 flex items-center gap-2">
+                        <FlaskConical size={12} className="text-slate-400" /> Pathogen Key
+                    </h4>
+                    <div className="space-y-2">
+                        {filterOptions.diseases.map((d: string) => (
+                            <div key={d} className="flex items-center gap-2">
+                                <span className="w-2.5 h-2.5 rounded-full shadow-sm" style={{ backgroundColor: diseaseColorMap[d] || '#ccc' }}></span> 
+                                <span className="text-slate-600 font-medium">{d}</span>
+                            </div>
+                        ))}
                     </div>
-                ))}
-            </div>
-
-            <div className="mt-3 pt-3 border-t border-slate-200 text-[10px] text-slate-400">
-                Total Markers: <strong>{mapData.length}</strong>
-            </div>
+                    <div className="mt-3 pt-3 border-t border-slate-200 text-[10px] text-slate-400">
+                        Total Markers: <strong>{mapData.length}</strong>
+                    </div>
+                </div>
+            )}
         </div>
-      </div>
 
+        {/* DETAILS PANEL (Appears at bottom when selected) */}
+        {selectedReport && (
+            <div className="h-48 bg-white border-t border-slate-200 shadow-2xl p-4 flex gap-6 shrink-0 animate-in slide-in-from-bottom-10 duration-300 relative z-[2000]">
+                {/* Close Button */}
+                <button 
+                    onClick={() => setSelectedReport(null)}
+                    className="absolute top-2 right-2 p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-full transition-colors"
+                >
+                    <X size={20} />
+                </button>
+
+                {/* Image Section */}
+                <div className="w-48 h-full shrink-0">
+                    {selectedReport.image_url ? (
+                        <img 
+                            src={`http://localhost:8000/${selectedReport.image_url}`} 
+                            alt="Disease Report"
+                            className="w-full h-full object-cover rounded-lg border border-slate-200 shadow-sm cursor-pointer hover:opacity-90"
+                            onClick={() => window.open(`http://localhost:8000/${selectedReport.image_url}`, '_blank')}
+                        />
+                    ) : (
+                        <div className="w-full h-full bg-slate-100 rounded-lg flex items-center justify-center text-slate-400 text-xs">
+                            No Image Available
+                        </div>
+                    )}
+                </div>
+
+                {/* Info Section */}
+                <div className="flex-1 flex flex-col justify-center">
+                    <div className="flex items-center gap-3 mb-2">
+                        <span 
+                            className="w-3 h-3 rounded-full" 
+                            style={{ backgroundColor: diseaseColorMap[selectedReport.disease] || '#ccc' }}
+                        ></span>
+                        <h2 className="text-xl font-bold text-slate-800">{selectedReport.disease}</h2>
+                        <span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-xs font-bold rounded border border-slate-200">
+                            ID: #{selectedReport.id}
+                        </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-2">
+                        <div className="p-3 bg-slate-50 rounded-lg border border-slate-100">
+                            <p className="text-xs text-slate-400 font-bold uppercase">Confidence</p>
+                            <p className="text-sm font-semibold text-slate-700">{(selectedReport.confidence * 100).toFixed(1)}%</p>
+                        </div>
+                        <div className="p-3 bg-slate-50 rounded-lg border border-slate-100">
+                            <p className="text-xs text-slate-400 font-bold uppercase">Date</p>
+                            <p className="text-sm font-semibold text-slate-700">{selectedReport.date}</p>
+                        </div>
+                        <div className="p-3 bg-slate-50 rounded-lg border border-slate-100 col-span-2">
+                            <p className="text-xs text-slate-400 font-bold uppercase flex items-center gap-1">
+                                <MapPin size={10} /> Location
+                            </p>
+                            <p className="text-sm font-semibold text-slate-700 truncate" title={selectedReport.location}>
+                                {selectedReport.location}
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        )}
+
+      </div>
     </div>
   );
 }

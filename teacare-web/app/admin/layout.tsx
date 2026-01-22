@@ -12,7 +12,8 @@ import {
   Sprout,
   ScrollText,
   Bot,
-  ClipboardList
+  ClipboardList,
+  Book
 } from 'lucide-react';
 
 // Update the menu items array
@@ -25,6 +26,7 @@ const adminLinks = [
   { href: '/admin/logs', label: 'Activity Logs', icon: ScrollText }, 
   { href: '/admin/rag', label: 'Chatbot Training', icon: Bot },
   { href: '/admin/reports', label: 'Disease Reports', icon: ClipboardList },
+  { href: '/admin/library', label: 'Pathogen Library Review', icon: Book },
 ];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
