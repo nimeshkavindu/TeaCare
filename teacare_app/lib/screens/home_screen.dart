@@ -9,6 +9,7 @@ import 'community_screen.dart';
 import 'profile_screen.dart';
 import 'heat_map_screen.dart';
 import 'tea_chat_screen.dart';
+import 'library_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   final String userName;
@@ -629,11 +630,18 @@ class _HomeScreenState extends State<HomeScreen> {
                 () {},
               ),
               _buildModernActionCard(
-                Icons.local_florist_rounded,
+                Icons.menu_book_rounded,
                 Colors.green,
-                "Crop Manual",
-                "Care & Tips",
-                () {},
+                "Disease Library",
+                "Reference Guide",
+                () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const LibraryScreen(),
+                    ),
+                  );
+                },
               ),
             ],
           ),
