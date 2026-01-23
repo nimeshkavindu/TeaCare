@@ -2,7 +2,7 @@ name: teacare_app
 description: "A new Flutter project."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
-publish_to: 'none' # Remove this line if you wish to publish to pub.dev
+publish_to: "none" # Remove this line if you wish to publish to pub.dev
 
 # The following defines the version and build number for your application.
 # A version number is three numbers separated by dots, like 1.2.43
@@ -39,10 +39,10 @@ dependencies:
   shared_preferences: ^2.5.4
   camera: ^0.10.5+9
   google_maps_flutter: ^2.5.3
-  geolocator: ^10.1.0 
-  flutter_map: ^6.1.0  
+  geolocator: ^10.1.0
+  flutter_map: ^6.1.0
   latlong2: ^0.9.0
-  flutter_map_marker_cluster: ^1.3.3 
+  flutter_map_marker_cluster: ^1.3.3
   flutter_map_heatmap: ^0.0.7
   intl: ^0.18.0
   share_plus: ^10.0.0
@@ -64,13 +64,13 @@ dev_dependencies:
 
 # The following section is specific to Flutter packages.
 flutter:
-
   # The following line ensures that the Material Icons font is
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
   assets:
     - assets/leaf_outline.png
+    - assets/images/
 
   # To add assets to your application, add an assets section, like this:
   # assets:

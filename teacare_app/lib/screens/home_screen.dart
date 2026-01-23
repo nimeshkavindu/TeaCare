@@ -10,6 +10,7 @@ import 'profile_screen.dart';
 import 'heat_map_screen.dart';
 import 'tea_chat_screen.dart';
 import 'library_screen.dart';
+import 'app_guide_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   final String userName;
@@ -627,7 +628,14 @@ class _HomeScreenState extends State<HomeScreen> {
                 Colors.purple,
                 "App Guide",
                 "How to use",
-                () {},
+                () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const AppGuideScreen(),
+                    ),
+                  );
+                },
               ),
               _buildModernActionCard(
                 Icons.menu_book_rounded,
