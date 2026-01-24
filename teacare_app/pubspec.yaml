@@ -1,4 +1,4 @@
-name: teacare_app
+name: TeaCare
 description: "A new Flutter project."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
@@ -47,6 +47,8 @@ dependencies:
   intl: ^0.18.0
   share_plus: ^10.0.0
   app_links: ^6.3.0
+  flutter_local_notifications: ^17.0.0
+  flutter_launcher_icons: "^0.13.1"
 
 dev_dependencies:
   flutter_test:
@@ -102,3 +104,12 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+
+flutter_icons:
+  android: "ic_launcher" # The name of the icon file on Android
+  ios: true # Generate for iOS too
+  image_path: "assets/images/app_icon.png" # The path to the image you created in Step 1
+  min_sdk_android: 21 # Needed for newer Android adaptive icons support
+  # Optional: If your icon has a transparent background and you want a specific background color:
+  # adaptive_icon_background: "#FFFFFF" # White background color
+  # image_path_android: "assets/images/app_icon.png" # Foreground image for adaptive icons

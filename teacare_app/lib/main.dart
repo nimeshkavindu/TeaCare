@@ -7,6 +7,7 @@ import 'dart:convert';
 import 'screens/welcome_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/post_detail_screen.dart';
+import 'services/notification_service.dart';
 
 void main() async {
   // 1. Required for async code in main
@@ -49,6 +50,9 @@ class _MyAppState extends State<MyApp> {
   @override
   void initState() {
     super.initState();
+
+    NotificationService.init(navigatorKey);
+    
     _initDeepLinks();
   }
 

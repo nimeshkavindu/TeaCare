@@ -202,6 +202,16 @@ class KnowledgeBase(Base):
     status = Column(String, default="Pending") # Pending, Approved, Rejected
     submitted_by = Column(String)    # Researcher Name
     timestamp = Column(DateTime, default=datetime.now)
+
+class Notification(Base):
+    __tablename__ = "notifications"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer) # If 0 or null, it implies a "Global Announcement"
+    title = Column(String)
+    message = Column(String)
+    type = Column(String)     # "Alert", "Info", "Success", "Announcement"
+    is_read = Column(Boolean, default=False)
+    timestamp = Column(String)
     
 
 class StatusUpdate(BaseModel):
@@ -507,12 +517,35 @@ def register(user: UserRegister, db: Session = Depends(get_db)):
     new_email = c_val if c_type == "email" else None
     hashed_secret = get_password_hash(user.secret)
 
-    new_user = User(full_name=user.full_name, phone_number=new_phone, email=new_email, password_hash=hashed_secret, role=user.role)
+    new_user = User(full_name=user.full_name, phone_number=new_phone, email=new_email, password_hash=hashed_secret, role=user.role.lower())
     db.add(new_user)
     db.commit()
 
     log_event(db, "SUCCESS", "Auth", f"New user registered: {c_val}")
     return {"message": "Registration successful"}
+
+# --- USER UPDATE MODEL ---
+class UserUpdate(BaseModel):
+    full_name: Optional[str] = None
+    secret: Optional[str] = None
+
+# --- UPDATE PROFILE ENDPOINT ---
+@app.put("/users/{user_id}")
+def update_user_profile(user_id: int, update_data: UserUpdate, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.user_id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if update_data.full_name:
+        user.full_name = update_data.full_name
+    
+    if update_data.secret:
+        # Hash the new password/PIN before saving
+        user.password_hash = get_password_hash(update_data.secret)
+    
+    db.commit()
+    log_event(db, "INFO", "User Mgmt", f"User {user_id} updated profile")
+    return {"message": "Profile updated successfully"}
 
 # --- LOGIN ---
 @app.post("/login")
@@ -2345,3 +2378,42 @@ def delete_library_entry(id: int, db: Session = Depends(get_db)):
     db.commit()
     log_event(db, "WARNING", "Library", f"Admin DELETED Entry #{id} ({entry.name})")
     return {"message": "Entry deleted"}
+
+# --- NOTIFICATION ENDPOINTS ---
+
+# 1. Get Notifications for a User (Includes Global Announcements)
+@app.get("/notifications/{user_id}")
+def get_notifications(user_id: int, db: Session = Depends(get_db)):
+    # Fetch personal notifications OR global announcements (user_id=0)
+    notifs = db.query(Notification).filter(
+        or_(Notification.user_id == user_id, Notification.user_id == 0)
+    ).order_by(Notification.id.desc()).all()
+    return notifs
+
+# 2. Mark Notification as Read
+@app.patch("/notifications/{notif_id}/read")
+def mark_notification_read(notif_id: int, db: Session = Depends(get_db)):
+    notif = db.query(Notification).filter(Notification.id == notif_id).first()
+    if notif:
+        notif.is_read = True
+        db.commit()
+    return {"message": "Marked as read"}
+
+# 3. Admin: Send Global Announcement
+class AnnouncementRequest(BaseModel):
+    title: str
+    message: str
+
+@app.post("/api/admin/announce")
+def send_announcement(data: AnnouncementRequest, db: Session = Depends(get_db)):
+    # user_id = 0 represents a "Global" message
+    new_notif = Notification(
+        user_id=0, 
+        title=data.title,
+        message=data.message,
+        type="Announcement",
+        timestamp=datetime.now().strftime("%Y-%m-%d %H:%M")
+    )
+    db.add(new_notif)
+    db.commit()
+    return {"message": "Announcement sent to all users"}

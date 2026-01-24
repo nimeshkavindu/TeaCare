@@ -1,17 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'welcome_screen.dart'; 
+import 'welcome_screen.dart';
+import 'edit_profile_screen.dart';
+import 'notification_screen.dart';
 
 class ProfileScreen extends StatelessWidget {
   final String userName;
-  // We might need userId later if we want to fetch specific profile details from the server
-  // final int userId;
+  final int userId;
 
-  const ProfileScreen({super.key, required this.userName});
+  const ProfileScreen({
+    super.key,
+    required this.userName,
+    required this.userId,
+  });
 
   // --- LOGOUT FUNCTION ---
   Future<void> _handleLogout(BuildContext context) async {
-    // 1. Show confirmation dialog
     final bool? confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -19,11 +23,11 @@ class ProfileScreen extends StatelessWidget {
         content: const Text("Are you sure you want to log out?"),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false), // Cancel
+            onPressed: () => Navigator.pop(context, false),
             child: const Text("Cancel", style: TextStyle(color: Colors.grey)),
           ),
           TextButton(
-            onPressed: () => Navigator.pop(context, true), // Confirm
+            onPressed: () => Navigator.pop(context, true),
             child: const Text("Logout", style: TextStyle(color: Colors.red)),
           ),
         ],
@@ -31,14 +35,10 @@ class ProfileScreen extends StatelessWidget {
     );
 
     if (confirm == true && context.mounted) {
-      // 2. Get SharedPreferences and CLEAR all data
       final prefs = await SharedPreferences.getInstance();
       await prefs.clear();
 
-      print("User logged out. SharedPreferences cleared.");
-
       if (!context.mounted) return;
-      // 3. Navigate to Welcome Screen and remove all previous screens from history
       Navigator.pushAndRemoveUntil(
         context,
         MaterialPageRoute(builder: (context) => const WelcomeScreen()),
@@ -51,26 +51,27 @@ class ProfileScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF8F9FA),
-      // Simple AppBar
       appBar: AppBar(
         title: const Text(
           "My Profile",
-          style: TextStyle(color: Color(0xFF1F2937), fontWeight: FontWeight.bold),
+          style: TextStyle(
+            color: Color(0xFF1F2937),
+            fontWeight: FontWeight.bold,
+          ),
         ),
         backgroundColor: Colors.white,
         elevation: 0,
-        automaticallyImplyLeading: false, // Hide back button
+        automaticallyImplyLeading: false,
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20.0),
         child: Column(
           children: [
             // --- HEADER SECTION ---
-            const SizedBox(height: 20),
+            const SizedBox(height: 10),
             Center(
               child: Column(
                 children: [
-                  // Placeholder Avatar using your theme colors
                   CircleAvatar(
                     radius: 50,
                     backgroundColor: const Color(0xFFDCFCE7),
@@ -81,7 +82,6 @@ class ProfileScreen extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 16),
-                  // User Name
                   Text(
                     userName,
                     style: const TextStyle(
@@ -92,25 +92,64 @@ class ProfileScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 4),
                   const Text(
-                    "Tea Farmer", // Placeholder role
-                    style: TextStyle(
-                      fontSize: 16,
-                      color: Color(0xFF6B7280),
-                    ),
+                    "Tea Farmer",
+                    style: TextStyle(fontSize: 16, color: Color(0xFF6B7280)),
                   ),
                 ],
               ),
             ),
-            const SizedBox(height: 40),
+            const SizedBox(height: 24),
 
-            // --- MENU OPTIONS ---
+            // --- USEFUL STATS ROW (New Addition) ---
+            // This fills the space usefully without adding complex menus
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 20),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.05),
+                    blurRadius: 10,
+                  ),
+                ],
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  _buildStatItem("12", "Scans"),
+                  _buildVerticalLine(),
+                  _buildStatItem("5", "Issues"),
+                  _buildVerticalLine(),
+                  _buildStatItem("Active", "Status"),
+                ],
+              ),
+            ),
+            const SizedBox(height: 30),
+
+            // --- ACCOUNT SETTINGS ---
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: Padding(
+                padding: EdgeInsets.only(bottom: 8.0, left: 4),
+                child: Text(
+                  "Settings",
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.grey,
+                  ),
+                ),
+              ),
+            ),
             Container(
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(16),
                 boxShadow: [
                   BoxShadow(
-                      color: Colors.black.withOpacity(0.05), blurRadius: 10),
+                    color: Colors.black.withOpacity(0.05),
+                    blurRadius: 10,
+                  ),
                 ],
               ),
               child: Column(
@@ -119,25 +158,42 @@ class ProfileScreen extends StatelessWidget {
                     icon: Icons.edit_outlined,
                     title: "Edit Profile",
                     onTap: () {
-                      // TODO: Navigate to edit profile screen
-                      ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text("Coming Soon!")));
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => EditProfileScreen(
+                            userId: userId,
+                            currentName: userName,
+                          ),
+                        ),
+                      );
                     },
                   ),
                   _buildDivider(),
                   _buildProfileOption(
-                    icon: Icons.notifications_outlined,
+                    icon: Icons.notifications_none_rounded,
                     title: "Notifications",
                     onTap: () {
-                      // TODO: Notification settings
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) =>
+                              NotificationScreen(userId: userId),
+                        ),
+                      );
                     },
                   ),
                   _buildDivider(),
+                  // Useful for a Community-based app
                   _buildProfileOption(
-                    icon: Icons.help_outline,
-                    title: "Help & Support",
+                    icon: Icons.forum_outlined,
+                    title: "My Community Posts",
                     onTap: () {
-                      // TODO: Navigate to help page or open web link
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text("Your post history coming soon!"),
+                        ),
+                      );
                     },
                   ),
                   _buildDivider(),
@@ -145,19 +201,19 @@ class ProfileScreen extends StatelessWidget {
                     icon: Icons.info_outline,
                     title: "About TeaCare",
                     onTap: () {
-                       showAboutDialog(
+                      showAboutDialog(
                         context: context,
                         applicationName: "TeaCare",
                         applicationVersion: "1.0.0",
-                        applicationLegalese: "© 2024 TeaCare Solutions",
-                       );
+                        applicationLegalese: "© 2026 TeaCare Solutions",
+                      );
                     },
                   ),
                 ],
               ),
             ),
 
-            const SizedBox(height: 30),
+            const SizedBox(height: 40),
 
             // --- LOGOUT BUTTON ---
             SizedBox(
@@ -166,8 +222,8 @@ class ProfileScreen extends StatelessWidget {
               child: ElevatedButton.icon(
                 onPressed: () => _handleLogout(context),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFFFEE2E2), // Light red
-                  foregroundColor: Colors.red, // Red text/icon
+                  backgroundColor: const Color(0xFFFEE2E2),
+                  foregroundColor: Colors.red,
                   elevation: 0,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
@@ -180,15 +236,40 @@ class ProfileScreen extends StatelessWidget {
                 ),
               ),
             ),
-             const SizedBox(height: 20),
-             Text("Version 1.0.0", style: TextStyle(color: Colors.grey[400])),
+            const SizedBox(height: 20),
+            Text("Version 1.0.0", style: TextStyle(color: Colors.grey[400])),
           ],
         ),
       ),
     );
   }
 
-  // Helper widget for menu items
+  // --- STATS WIDGETS ---
+  Widget _buildStatItem(String value, String label) {
+    return Column(
+      children: [
+        Text(
+          value,
+          style: const TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
+            color: Color(0xFF1F2937),
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          label,
+          style: const TextStyle(fontSize: 14, color: Color(0xFF6B7280)),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildVerticalLine() {
+    return Container(height: 30, width: 1, color: Colors.grey[300]);
+  }
+
+  // --- MENU WIDGETS ---
   Widget _buildProfileOption({
     required IconData icon,
     required String title,
@@ -198,23 +279,29 @@ class ProfileScreen extends StatelessWidget {
       leading: Container(
         padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
-            color: const Color(0xFFF3F4F6),
-            borderRadius: BorderRadius.circular(8)),
+          color: const Color(0xFFF3F4F6),
+          borderRadius: BorderRadius.circular(8),
+        ),
         child: Icon(icon, color: const Color(0xFF1F2937)),
       ),
       title: Text(
         title,
         style: const TextStyle(
-            fontSize: 16, fontWeight: FontWeight.w500, color: Color(0xFF1F2937)),
+          fontSize: 16,
+          fontWeight: FontWeight.w500,
+          color: Color(0xFF1F2937),
+        ),
       ),
-      trailing:
-          const Icon(Icons.chevron_right, color: Color(0xFF9CA3AF), size: 20),
+      trailing: const Icon(
+        Icons.chevron_right,
+        color: Color(0xFF9CA3AF),
+        size: 20,
+      ),
       onTap: onTap,
       contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
     );
   }
 
-  // Helper for dividers
   Widget _buildDivider() {
     return const Divider(height: 1, thickness: 1, color: Color(0xFFF3F4F6));
   }

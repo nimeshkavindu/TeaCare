@@ -11,6 +11,9 @@ import 'heat_map_screen.dart';
 import 'tea_chat_screen.dart';
 import 'library_screen.dart';
 import 'app_guide_screen.dart';
+import 'dart:async';
+import '../services/notification_service.dart';
+import 'notification_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   final String userName;
@@ -29,11 +32,72 @@ class _HomeScreenState extends State<HomeScreen> {
   final String serverUrl = "http://192.168.8.122:8000/predict";
 
   int _selectedIndex = 0;
+  Timer? _notificationTimer;
 
   @override
   void initState() {
     super.initState();
     _fetchHistory();
+
+    _checkNewNotifications();
+
+    // Repeat every 10 seconds
+    _notificationTimer = Timer.periodic(const Duration(seconds: 10), (timer) {
+      _checkNewNotifications();
+    });
+  }
+
+  @override
+  void dispose() {
+    _notificationTimer?.cancel(); // Important: Stop timer to prevent leaks
+    super.dispose();
+  }
+
+  // --- POLLING LOGIC ---
+  Future<void> _checkNewNotifications() async {
+    try {
+      // FIX: Clean the URL to remove "/predict" before asking for notifications
+      final String baseUrl = serverUrl.replaceAll("/predict", "");
+
+      // 1. Fetch notifications from the correct URL
+      final response = await http.get(
+        Uri.parse("$baseUrl/notifications/${widget.userId}"),
+      );
+
+      if (response.statusCode == 200) {
+        List<dynamic> data = jsonDecode(response.body);
+
+        // 2. Filter: Find UNREAD items
+        var unread = data.where((n) => n['is_read'] == false).toList();
+
+        if (unread.isNotEmpty) {
+          var latest = unread.first;
+
+          // 3. Trigger the Local Notification
+          NotificationService.showNotification(
+            id: latest['id'],
+            title: latest['title'],
+            body: latest['message'],
+          );
+
+          // 4. Mark as read immediately
+          // FIX: Use the clean baseUrl here too
+          await http.patch(
+            Uri.parse("$baseUrl/notifications/${latest['id']}/read"),
+          );
+        }
+      }
+    } catch (e) {
+      print("Polling Error: $e");
+    }
+  }
+
+  Future<void> _markAsReadSilently(int id) async {
+    try {
+      await http.patch(Uri.parse("$serverUrl/notifications/$id/read"));
+    } catch (e) {
+      // Ignore error, we will try again next poll
+    }
   }
 
   // --- NAVIGATION LOGIC (UNCHANGED) ---
@@ -264,7 +328,16 @@ class _HomeScreenState extends State<HomeScreen> {
                         size: 28,
                       ),
                       color: Colors.grey[600],
-                      onPressed: () {},
+                      onPressed: () {
+                        // Navigate to the Notification History Screen
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) =>
+                                NotificationScreen(userId: widget.userId),
+                          ),
+                        );
+                      },
                     ),
                     Positioned(
                       top: 10,
@@ -288,8 +361,10 @@ class _HomeScreenState extends State<HomeScreen> {
                       Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (context) =>
-                              ProfileScreen(userName: widget.userName),
+                          builder: (context) => ProfileScreen(
+                            userName: widget.userName,
+                            userId: widget.userId,
+                          ),
                         ),
                       );
                     },
@@ -374,7 +449,7 @@ class _HomeScreenState extends State<HomeScreen> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 _buildNavItem(0, Icons.home_rounded, "Home"),
-                _buildNavItem(1, Icons.qr_code_scanner_rounded, "Scan"),
+                _buildNavItem(1, Icons.center_focus_weak, "Scan"),
                 _buildNavItem(2, Icons.forum_rounded, "Community"),
                 _buildNavItem(3, Icons.map_rounded, "Map"),
                 _buildNavItem(4, Icons.support_agent_rounded, "AI Chat"),

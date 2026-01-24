@@ -1,7 +1,6 @@
 plugins {
     id("com.android.application")
     id("kotlin-android")
-    // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
 
@@ -13,6 +12,9 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        
+        // --- CHANGE 1: Enable Desugaring (Kotlin Syntax) ---
+        isCoreLibraryDesugaringEnabled = true  // <--- ADD THIS LINE
     }
 
     kotlinOptions {
@@ -20,20 +22,18 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.example.teacare_app"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        
+        // Optional: Good to have for larger apps
+        multiDexEnabled = true 
     }
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
         }
     }
@@ -41,4 +41,10 @@ android {
 
 flutter {
     source = "../.."
+}
+
+// --- CHANGE 2: Add Dependencies Block (Kotlin Syntax) ---
+dependencies {
+    // This library makes modern Java features work on old Android phones
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4") // <--- ADD THIS
 }
