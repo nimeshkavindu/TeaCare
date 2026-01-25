@@ -86,6 +86,50 @@ async def send_otp_email(email: str, otp: str):
     fm = FastMail(email_conf)
     await fm.send_message(message)
 
+
+# main.py
+
+# --- CONFIGURATION ---
+TEXTLK_API_TOKEN = "3095|uo6qH3huM0OMixTL7Fn9kZ9FMCPY90er0JvWeDIh5e3400f2"  # <--- PASTE TOKEN HERE
+TEXTLK_SENDER_ID = "TextLKDemo"                   # <--- CHANGE IF YOU HAVE A CUSTOM ID
+
+# --- HELPER: Send OTP via SMS (Text.lk) ---
+async def send_otp_sms(phone: str, otp: str):
+    url = "https://app.text.lk/api/v3/sms/send"
+    
+    # 1. Format Phone Number (Text.lk requires 947XXXXXXXX)
+    # Remove spaces and + signs
+    clean_phone = phone.replace("+", "").replace(" ", "").strip()
+    
+    # If user entered "077...", change it to "9477..."
+    if clean_phone.startswith("0"):
+        clean_phone = "94" + clean_phone[1:]
+    
+    print(f"👉 Sending SMS to: {clean_phone}")
+
+    payload = {
+        "recipient": clean_phone,
+        "sender_id": TEXTLK_SENDER_ID,
+        "type": "plain",
+        "message": f"Your TeaCare verification code is: {otp}"
+    }
+    
+    headers = {
+        "Authorization": f"Bearer {TEXTLK_API_TOKEN}",
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+    }
+    
+    # Use httpx for async sending (Better for FastAPI than requests)
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.post(url, json=payload, headers=headers)
+            print(f"✅ SMS Sent! Status: {resp.status_code}")
+            print(f"Response: {resp.text}")
+        except Exception as e:
+            print(f"⚠️ SMS Failed: {e}")
+            print(f"👉 [BACKUP] OTP for {clean_phone}: {otp}")
+
 # --- HELPER: SYSTEM LOGGING ---
 def log_event(db: Session, level: str, source: str, message: str):
     try:
@@ -578,9 +622,11 @@ async def register(user: UserRegister, db: Session = Depends(get_db)): # Note: A
     db.add(new_user)
     db.commit()
 
-    # Send OTP if Email
+    # Send OTP
     if c_type == "email":
         await send_otp_email(c_val, otp)
+    elif c_type == "phone":
+        await send_otp_sms(c_val, otp) 
     
     return {"message": "OTP sent", "contact": c_val}
 
