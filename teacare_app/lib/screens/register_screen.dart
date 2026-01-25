@@ -90,7 +90,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
     try {
       final response = await http.post(
-        Uri.parse(serverUrl),
+        Uri.parse(serverUrl), // This calls /register
         headers: {"Content-Type": "application/json"},
         body: jsonEncode({
           "full_name": _nameCtrl.text.trim(),
@@ -102,23 +102,123 @@ class _RegisterScreenState extends State<RegisterScreen> {
       );
 
       if (response.statusCode == 200) {
+        // SUCCESS: OTP SENT -> Show Dialog
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text("Registered! Please Login."),
-              backgroundColor: Colors.green,
-            ),
-          );
-          Navigator.pop(context);
+          _showOtpDialog(contactVal);
         }
       } else {
-        // Use the safe helper here
         _showError(_getBackendError(response.body));
       }
     } catch (e) {
-      _showError("Connection error. Check your server.");
+      _showError("Connection error: $e");
     } finally {
       if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  // --- SHOW OTP DIALOG ---
+  void _showOtpDialog(String contact) {
+    final TextEditingController otpController = TextEditingController();
+    bool isVerifying = false;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false, // User must verify or cancel
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Text("Enter OTP"),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text("We sent a code to $contact"),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: otpController,
+                    keyboardType: TextInputType.number,
+                    maxLength: 6,
+                    textAlign: TextAlign.center,
+                    decoration: const InputDecoration(
+                      hintText: "6-Digit Code",
+                      border: OutlineInputBorder(),
+                      counterText: "",
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  if (isVerifying) const CircularProgressIndicator(),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text("Cancel"),
+                ),
+                ElevatedButton(
+                  onPressed: isVerifying
+                      ? null
+                      : () => _verifyOtp(contact, otpController.text, setDialogState),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF11D452),
+                    foregroundColor: Colors.white, // Ensure text is readable
+                  ),
+                  child: const Text("Verify"),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  // --- CALL VERIFY ENDPOINT ---
+  Future<void> _verifyOtp(String contact, String otp, Function setDialogState) async {
+    if (otp.length < 6) return;
+
+    setDialogState(() => true); // Show loading in dialog
+
+    // Construct verify URL (Assuming backend is at /verify-otp)
+    // Using string replacement to maintain the base IP address logic
+    final String verifyUrl = serverUrl.replaceAll("/register", "/verify-otp");
+
+    try {
+      final response = await http.post(
+        Uri.parse(verifyUrl),
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({
+          "contact_value": contact,
+          "otp": otp,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        // SUCCESS!
+        if (mounted) {
+          Navigator.pop(context); // Close Dialog
+          Navigator.pop(context); // Close Register Screen (optional, or navigate to login)
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Account Verified! Please Login."), backgroundColor: Colors.green),
+          );
+        }
+      } else {
+        // Show error but keep dialog open
+        final error = _getBackendError(response.body);
+        if (mounted) {
+           ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error), backgroundColor: Colors.red));
+        }
+      }
+    } catch (e) {
+      print(e);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Connection Error: $e"), backgroundColor: Colors.red));
+      }
+    } finally {
+      // Stop loading regardless of success or failure
+      // We check if the widget (dialog) is still in the tree before calling setState
+      // Since setDialogState is a callback from StatefulBuilder, it might be tricky to check mounted directly for the dialog
+      // But typically safe in this direct flow.
+      setDialogState(() => false); 
     }
   }
 

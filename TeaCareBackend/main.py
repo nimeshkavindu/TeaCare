@@ -45,12 +45,46 @@ import random
 import math
 from sqlalchemy import distinct
 from sqlalchemy import cast, TIMESTAMP
+from sqlalchemy import Boolean, Column, Integer, String, DateTime
+import random
+import string
+from datetime import datetime, timedelta
+from fastapi_mail import FastMail, MessageSchema, ConnectionConfig, MessageType
+from pydantic import EmailStr
 
 # --- DATABASE CONFIG ---
 SQLALCHEMY_DATABASE_URL = "postgresql://postgres:admin123@localhost/teacare_db"
 engine = create_engine(SQLALCHEMY_DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
+
+# --- EMAIL CONFIGURATION ---
+email_conf = ConnectionConfig(
+    MAIL_USERNAME="nimesh.devtest@gmail.com",    # REPLACE THIS
+    MAIL_PASSWORD="ccpd oxyn zpbb wubh",     # REPLACE WITH APP PASSWORD
+    MAIL_FROM="nimesh.devtest@gmail.com",        # REPLACE THIS
+    MAIL_PORT=587,
+    MAIL_SERVER="smtp.gmail.com",
+    MAIL_STARTTLS=True,
+    MAIL_SSL_TLS=False,
+    USE_CREDENTIALS=True,
+    VALIDATE_CERTS=True
+)
+
+# --- HELPER: Generate 6-Digit OTP ---
+def generate_otp():
+    return ''.join(random.choices(string.digits, k=6))
+
+# --- HELPER: Send OTP Email ---
+async def send_otp_email(email: str, otp: str):
+    message = MessageSchema(
+        subject="TeaCare Verification Code",
+        recipients=[email],
+        body=f"<h3>Your TeaCare Verification Code</h3><p>Your OTP is: <strong>{otp}</strong></p><p>It expires in 10 minutes.</p>",
+        subtype=MessageType.html
+    )
+    fm = FastMail(email_conf)
+    await fm.send_message(message)
 
 # --- HELPER: SYSTEM LOGGING ---
 def log_event(db: Session, level: str, source: str, message: str):
@@ -91,6 +125,9 @@ class User(Base):
     role = Column(String) 
     is_active = Column(Boolean, default=True)  
     last_login = Column(String, nullable=True) 
+    otp_code = Column(String, nullable=True)
+    otp_expiry = Column(DateTime, nullable=True)
+    is_verified = Column(Boolean, default=False)
     
 class DiseaseReport(Base):
     __tablename__ = "disease_reports"
@@ -500,31 +537,84 @@ def submit_feedback(report_id: int, feedback: FeedbackRequest, db: Session = Dep
     db.commit()
     return {"message": "Feedback received"}
 
-# --- REGISTER ---
+# main.py (Updated Endpoints)
+
+# --- 1. REGISTER (UPDATED) ---
 @app.post("/register")
-def register(user: UserRegister, db: Session = Depends(get_db)):
+async def register(user: UserRegister, db: Session = Depends(get_db)): # Note: Added async
     c_type = user.contact_type.lower()
     c_val = user.contact_value.lower() if c_type == 'email' else user.contact_value
 
+    # Check if user exists
     existing_user = db.query(User).filter(
         or_(User.phone_number == c_val, User.email == c_val)
     ).first()
     
     if existing_user:
-        log_event(db, "WARNING", "Auth", f"Register Failed: User already exists ({c_val})")
-        raise HTTPException(status_code=400, detail="User already registered")
+        # If user exists but NOT verified, we can overwrite/resend (optional logic)
+        if not existing_user.is_verified:
+            db.delete(existing_user)
+            db.commit()
+        else:
+            raise HTTPException(status_code=400, detail="User already registered")
 
-    new_phone = c_val if c_type == "phone" else None
-    new_email = c_val if c_type == "email" else None
     hashed_secret = get_password_hash(user.secret)
+    
+    # Generate OTP
+    otp = generate_otp()
+    expiry = datetime.utcnow() + timedelta(minutes=10)
 
-    new_user = User(full_name=user.full_name, phone_number=new_phone, email=new_email, password_hash=hashed_secret, role=user.role.lower())
+    new_user = User(
+        full_name=user.full_name,
+        phone_number=c_val if c_type == "phone" else None,
+        email=c_val if c_type == "email" else None,
+        password_hash=hashed_secret,
+        role=user.role.lower(),
+        otp_code=otp,
+        otp_expiry=expiry,
+        is_verified=False # User is NOT active yet
+    )
+    
     db.add(new_user)
     db.commit()
 
-    log_event(db, "SUCCESS", "Auth", f"New user registered: {c_val}")
-    return {"message": "Registration successful"}
+    # Send OTP if Email
+    if c_type == "email":
+        await send_otp_email(c_val, otp)
+    
+    return {"message": "OTP sent", "contact": c_val}
 
+# --- 2. VERIFY OTP (NEW) ---
+class VerifyRequest(BaseModel):
+    contact_value: str
+    otp: str
+
+@app.post("/verify-otp")
+def verify_otp(req: VerifyRequest, db: Session = Depends(get_db)):
+    # Find User
+    user = db.query(User).filter(
+        or_(User.email == req.contact_value, User.phone_number == req.contact_value)
+    ).first()
+
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if user.is_verified:
+        return {"message": "Already verified"}
+
+    # Check OTP
+    if user.otp_code != req.otp:
+        raise HTTPException(status_code=400, detail="Invalid OTP")
+    
+    if datetime.utcnow() > user.otp_expiry:
+        raise HTTPException(status_code=400, detail="OTP Expired")
+
+    # Activate User
+    user.is_verified = True
+    user.otp_code = None # Clear OTP
+    db.commit()
+
+    return {"message": "Verification Successful"}
 # --- USER UPDATE MODEL ---
 class UserUpdate(BaseModel):
     full_name: Optional[str] = None
