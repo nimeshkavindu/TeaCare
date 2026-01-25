@@ -44,6 +44,7 @@ from datetime import timedelta
 import random
 import math
 from sqlalchemy import distinct
+from sqlalchemy import cast, TIMESTAMP
 
 # --- DATABASE CONFIG ---
 SQLALCHEMY_DATABASE_URL = "postgresql://postgres:admin123@localhost/teacare_db"
@@ -575,86 +576,147 @@ def login(request: LoginRequest, db: Session = Depends(get_db)):
 def get_history(user_id: int, db: Session = Depends(get_db)):
     return db.query(DiseaseReport).filter(DiseaseReport.user_id == user_id).order_by(DiseaseReport.report_id.desc()).all()
 
+# --- HELPER: Professional Weather Analysis ---
+def analyze_weather_risk(temp, humidity, rain, wind, condition):
+    """
+    Returns a professional assessment based on Tea Agronomy principles.
+    Instead of guessing the disease, we report 'Favorable Conditions'.
+    """
+    alerts = []
+    
+    # 1. Fungal Disease Risk (Blister Blight / Root Rot)
+    # Scientific Basis: High humidity (>85%) and moderate temps favor fungal spores.
+    if humidity > 85 and (condition in ["Rainy", "Cloudy"] or rain > 0.5):
+        alerts.append({
+            "title": "⚠️ Fungal Risk Alert",
+            "message": "High humidity detected. Conditions are favorable for Blister Blight. Inspect tender leaves.",
+            "type": "Alert",
+            "risk": "High"
+        })
+
+    # 2. Pest Risk (Mites / Thrips)
+    # Scientific Basis: Dry, hot conditions stress the plant and favor mites.
+    elif temp > 30 and humidity < 60:
+        alerts.append({
+            "title": "🕷️ Pest Risk Warning",
+            "message": "High temperature and low humidity detected. Conditions favor Red Spider Mite activity. Monitor fields.",
+            "type": "Alert", 
+            "risk": "Medium"
+        })
+
+    # 3. Operational Safety (Spraying)
+    # Scientific Basis: Wind causes drift; Rain washes away chemicals.
+    if wind > 15:
+        alerts.append({
+            "title": "💨 High Wind Alert",
+            "message": "Wind speeds > 15km/h. Spraying is NOT recommended due to chemical drift.",
+            "type": "Info",
+            "risk": "Medium"
+        })
+    elif rain > 0.0:
+        alerts.append({
+            "title": "🌧️ Spraying Advisory",
+            "message": "Rainfall detected. Avoid spraying fertilizers/pesticides to prevent washout.",
+            "type": "Info",
+            "risk": "Low"
+        })
+
+    # 4. General Heavy Rain
+    if rain > 20.0: # 20mm is significant
+        alerts.append({
+            "title": "🌧️ Heavy Rain Alert",
+            "message": "Significant rainfall forecast. Ensure drainage channels are clear to prevent waterlogging.",
+            "type": "Alert",
+            "risk": "High"
+        })
+
+    # Default: Good Conditions
+    if not alerts:
+        alerts.append({
+            "title": "✅ Optimal Conditions",
+            "message": "Weather is favorable for routine plantation work.",
+            "type": "Success",
+            "risk": "Low"
+        })
+
+    return alerts
+
 # --- WEATHER ENDPOINT ---
 @app.get("/weather")
-async def get_weather_alert(lat: float = 6.9271, lng: float = 79.8612, db: Session = Depends(get_db)):
+async def get_weather_alert(lat: float = 6.9271, lng: float = 79.8612, user_id: int = 1, db: Session = Depends(get_db)):
     try:
-        # 1. Fetch Weather Data (Open-Meteo)
+        # 1. Fetch Weather Data
         weather_url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lng}&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m,precipitation&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum&timezone=auto"
-        
-        # 1.5 Fetch Location Name (Nominatim Reverse Geocoding) - NEW!
-        # We assume the estate is in Sri Lanka, but this works globally.
         geo_url = f"https://nominatim.openstreetmap.org/reverse?format=json&lat={lat}&lon={lng}"
         
         location_name = "Unknown Estate"
         
         async with httpx.AsyncClient() as client:
-            # Fetch Weather
             weather_resp = await client.get(weather_url)
             weather_data = weather_resp.json()
             
-            # Fetch Location Name
-            # User-Agent is required by OpenStreetMap policies
             try:
+                # Simple Geocoding
                 geo_resp = await client.get(geo_url, headers={"User-Agent": "TeaCareApp/1.0"})
                 if geo_resp.status_code == 200:
-                    geo_data = geo_resp.json()
-                    address = geo_data.get("address", {})
-                    
-                    # Try to get the most relevant name (City > Town > Village > State)
+                    address = geo_resp.json().get("address", {})
                     city = address.get("city") or address.get("town") or address.get("village")
-                    state = address.get("state") or address.get("province")
-                    
-                    if city and state:
-                        location_name = f"{city}, {state}"
-                    elif city:
-                        location_name = city
-                    elif state:
-                        location_name = state
-            except Exception as e:
-                print(f"Geocoding Error: {e}")
+                    location_name = city if city else "Sri Lanka"
+            except:
+                pass
 
-        # 2. Extract Weather Data
+        # 2. Extract Data
         current = weather_data.get("current", {})
         temp = current.get("temperature_2m", 0)
         humidity = current.get("relative_humidity_2m", 0)
-        wind_speed = current.get("wind_speed_10m", 0)
+        wind = current.get("wind_speed_10m", 0)
         rain = current.get("precipitation", 0)
         code = current.get("weather_code", 0)
 
-        # 3. Interpret Weather Code
+        # Helper to get text condition
         def get_condition(c):
             if c in [0]: return "Sunny"
             if c in [1, 2, 3]: return "Cloudy"
-            if c in [45, 48]: return "Foggy"
             if c in [51, 53, 55, 61, 63, 65, 80, 81, 82]: return "Rainy"
-            if c >= 95: return "Storm"
             return "Clear"
+            
+        condition_text = get_condition(code)
 
-        condition = get_condition(code)
+        # 3. Run Analysis
+        analysis = analyze_weather_risk(temp, humidity, rain, wind, condition_text)
+        primary = analysis[0]
 
-        # 4. Calculate Tea Risk
-        risk_level = "Low"
-        forecast_disease = "None"
-        advice = "Conditions are favorable for plantation work."
+        # TRIGGER NOTIFICATION ON SCREEN OPEN
 
-        if humidity > 85 and condition in ["Rainy", "Cloudy"]:
-            risk_level = "High"
-            forecast_disease = "Blister Blight"
-            advice = "Critical risk! Pause plucking if leaves are wet."
-        elif temp > 30 and humidity < 60:
-            risk_level = "Medium"
-            forecast_disease = "Red Spider Mite"
-            advice = "Dry heat detected. Inspect for mites."
+        cutoff = datetime.now() - timedelta(minutes=2)
+        
+        recent = db.query(Notification).filter(
+            Notification.user_id == user_id,
+            Notification.title.contains("Briefing"),
+            cast(Notification.timestamp, TIMESTAMP) >= cutoff 
+        ).first()
 
-        # 5. Spraying Advice
-        spraying_condition = "Safe"
-        if wind_speed > 20:
-            spraying_condition = "Unsafe (Windy)"
-        elif rain > 0.5 or condition == "Rainy":
-             spraying_condition = "Unsafe (Rain)"
+        if not recent:
+            # Create the Notification
+            briefing_msg = f"Current condition is {condition_text} ({round(temp)}°C). {primary['message']}"
+            
+            # Decide icon color based on risk
+            notif_type = "Alert" if primary["risk"] == "High" else "Info"
+            
+            new_notif = Notification(
+                user_id=user_id,
+                title="🌤️ Weather Briefing",
+                message=briefing_msg,
+                type=notif_type,
+                is_read=False,
+                timestamp=datetime.now()
+            )
+            db.add(new_notif)
+            db.commit()
+            print("Weather Notification Sent!")
+        # =========================================================
 
-        # 6. Process Daily Forecast
+        # 4. Return Response
         daily = weather_data.get("daily", {})
         forecast_list = []
         if "time" in daily:
@@ -667,30 +729,22 @@ async def get_weather_alert(lat: float = 6.9271, lng: float = 79.8612, db: Sessi
                     "condition": get_condition(daily["weather_code"][i])
                 })
 
-        log_event(db, "INFO", "Weather", f"Risk check at {location_name} (Lat:{lat:.2f})")
-
         return {
             "location": location_name, 
             "temperature": round(temp),
             "humidity": humidity,
-            "wind_speed": wind_speed,
-            "condition": condition,
-            "risk_level": risk_level,
-            "disease_forecast": forecast_disease,
-            "advice": advice,
-            "spraying_condition": spraying_condition,
+            "wind_speed": wind,
+            "condition": condition_text,
+            "risk_level": primary["risk"],
+            "disease_forecast": primary["title"],
+            "advice": primary["message"],
+            "spraying_condition": "Unsafe" if wind > 15 or rain > 0 else "Safe",
             "daily_forecast": forecast_list
         }
 
     except Exception as e:
         print(f"Weather Error: {e}")
-        log_event(db, "ERROR", "Weather", f"Weather API Failed: {str(e)}")
-        return {
-            "location": "Offline", "temperature": 0, "humidity": 0,
-            "condition": "Error", "risk_level": "Unknown", 
-            "disease_forecast": "Unknown", "advice": "Check internet connection.",
-            "spraying_condition": "Unknown", "daily_forecast": []
-        }
+        return {"location": "Offline", "daily_forecast": []}
 
 # --- COMMUNITY FORUM ENDPOINTS ---
 # 1. Create Post (Now with Category & Role)

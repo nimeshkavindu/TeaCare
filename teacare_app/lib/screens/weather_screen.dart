@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'package:geolocator/geolocator.dart'; // Import Geolocator
+import 'package:geolocator/geolocator.dart'; 
+import 'package:shared_preferences/shared_preferences.dart'; // Added for user_id
 
 class WeatherScreen extends StatefulWidget {
   const WeatherScreen({super.key});
@@ -15,22 +16,21 @@ class _WeatherScreenState extends State<WeatherScreen> {
   bool _isLoading = true;
   String? _errorMessage;
 
-  // Update with your server IP
+  // Ensure this IP matches your PC
   final String serverUrl = "http://192.168.8.122:8000/weather";
 
   @override
   void initState() {
     super.initState();
-    _getLocationAndFetchWeather(); // Start the process
+    _getLocationAndFetchWeather();
   }
 
-  // --- NEW: Get GPS Location first ---
+  // --- 1. GPS LOCATION & FETCH ---
   Future<void> _getLocationAndFetchWeather() async {
     try {
-      // 1. Check & Request Permissions
       bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
-        throw "Location services are disabled. Please enable GPS.";
+        throw "GPS is disabled. Please enable it.";
       }
 
       LocationPermission permission = await Geolocator.checkPermission();
@@ -45,46 +45,55 @@ class _WeatherScreenState extends State<WeatherScreen> {
         throw "Location permissions are permanently denied.";
       }
 
-      // 2. Get Current Position
+      // Get accurate location
       Position position = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high
+        desiredAccuracy: LocationAccuracy.high,
       );
 
-      // 3. Fetch Weather with REAL Coordinates
       await _fetchWeather(position.latitude, position.longitude);
 
     } catch (e) {
-      setState(() {
-        _isLoading = false;
-        _errorMessage = e.toString();
-      });
       print("Location Error: $e");
-      
-      // Fallback to Colombo if GPS fails
-      _fetchWeather(6.9271, 79.8612);
+      // Fallback to a default location (e.g. Badulla/Colombo) if GPS fails
+      if (mounted) _fetchWeather(6.9847, 81.0566); 
     }
   }
 
   Future<void> _fetchWeather(double lat, double lng) async {
     try {
-      // Pass lat & lng as query parameters
-      final url = Uri.parse("$serverUrl?lat=$lat&lng=$lng");
+      // Get User ID for the "Demo Notification" trigger
+      final prefs = await SharedPreferences.getInstance();
+      final userId = prefs.getInt('userId') ?? 1;
+
+      // Pass lat, lng AND user_id
+      final url = Uri.parse("$serverUrl?lat=$lat&lng=$lng&user_id=$userId");
       
       final response = await http.get(url);
+
       if (response.statusCode == 200) {
-        setState(() {
-          _weatherData = jsonDecode(response.body);
-          _isLoading = false;
-        });
+        if (mounted) {
+          setState(() {
+            _weatherData = jsonDecode(response.body);
+            _isLoading = false;
+          });
+        }
       } else {
         throw "Server error: ${response.statusCode}";
       }
     } catch (e) {
-      setState(() {
-        _isLoading = false;
-        _errorMessage = "Failed to load weather data";
-      });
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _errorMessage = "Could not connect to weather service.";
+        });
+      }
     }
+  }
+
+  // --- HELPER: Safe Data Extraction (The Fix for the Red Screen) ---
+  String _safeVal(String key, {String defaultVal = "N/A"}) {
+    if (_weatherData == null || _weatherData![key] == null) return defaultVal;
+    return _weatherData![key].toString();
   }
 
   @override
@@ -101,62 +110,60 @@ class _WeatherScreenState extends State<WeatherScreen> {
           ? const Center(child: CircularProgressIndicator(color: Color(0xFF4CAF50)))
           : _errorMessage != null && _weatherData == null
               ? Center(child: Text(_errorMessage!, style: const TextStyle(color: Colors.red)))
-              : _weatherData == null
-                  ? const Center(child: Text("Failed to load weather data"))
-                  : SingleChildScrollView(
-                      padding: const EdgeInsets.all(20),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+              : SingleChildScrollView(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // 1. CURRENT WEATHER
+                      _buildCurrentWeatherCard(),
+                      const SizedBox(height: 20),
+
+                      // 2. METRICS ROW
+                      Row(
                         children: [
-                          // 1. CURRENT WEATHER HEADER
-                          _buildCurrentWeatherCard(),
-                          
-                          const SizedBox(height: 20),
-
-                          // 2. SPRAYING ADVISOR & METRICS
-                          Row(
-                            children: [
-                              Expanded(child: _buildInfoTile(
-                                "Humidity", 
-                                "${_weatherData!['humidity']}%", 
-                                Icons.water_drop, 
-                                Colors.blue
-                              )),
-                              const SizedBox(width: 12),
-                              Expanded(child: _buildInfoTile(
-                                "Wind", 
-                                "${_weatherData!['wind_speed']} km/h", 
-                                Icons.air, 
-                                Colors.grey
-                              )),
-                            ],
-                          ),
-                          const SizedBox(height: 12),
-                          _buildSprayingCard(),
-
-                          const SizedBox(height: 24),
-
-                          // 3. DISEASE ALERT
-                          const Text("Disease Risk Analysis", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                          const SizedBox(height: 12),
-                          _buildRiskCard(),
-
-                          const SizedBox(height: 24),
-
-                          // 4. 7-DAY FORECAST
-                          const Text("7-Day Forecast", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                          const SizedBox(height: 12),
-                          _buildForecastList(),
+                          Expanded(child: _buildInfoTile(
+                            "Humidity", 
+                            "${_safeVal('humidity', defaultVal: '0')}%", 
+                            Icons.water_drop, 
+                            Colors.blue
+                          )),
+                          const SizedBox(width: 12),
+                          Expanded(child: _buildInfoTile(
+                            "Wind", 
+                            "${_safeVal('wind_speed', defaultVal: '0')} km/h", 
+                            Icons.air, 
+                            Colors.grey
+                          )),
                         ],
                       ),
-                    ),
+                      const SizedBox(height: 12),
+                      
+                      // 3. SPRAYING ADVICE
+                      _buildSprayingCard(),
+                      const SizedBox(height: 24),
+
+                      // 4. DISEASE ALERT
+                      const Text("Disease Risk Analysis", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 12),
+                      _buildRiskCard(),
+                      const SizedBox(height: 24),
+
+                      // 5. 7-DAY FORECAST
+                      const Text("7-Day Forecast", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 12),
+                      _buildForecastList(),
+                    ],
+                  ),
+                ),
     );
   }
-  
-  // ... (Keep the rest of your UI widgets: _buildCurrentWeatherCard, etc. unchanged) ...
-  // Paste the UI widgets from the previous weather_screen.dart response here
-  
+
+  // --- UI WIDGETS (Updated with Safe Access) ---
+
   Widget _buildCurrentWeatherCard() {
+    String condition = _safeVal('condition', defaultVal: "Sunny");
+    
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -167,29 +174,29 @@ class _WeatherScreenState extends State<WeatherScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Expanded( // Added Expanded to prevent overflow
+          Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  _weatherData!['location'], 
+                  _safeVal('location', defaultVal: "Tea Estate"), 
                   style: const TextStyle(color: Colors.white70, fontSize: 16),
-                  overflow: TextOverflow.ellipsis, // Handle long location names
+                  overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  "${_weatherData!['temperature']}°",
+                  "${_safeVal('temperature', defaultVal: '0')}°",
                   style: const TextStyle(color: Colors.white, fontSize: 48, fontWeight: FontWeight.bold),
                 ),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(20)),
-                  child: Text(_weatherData!['condition'], style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w500)),
+                  child: Text(condition, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w500)),
                 ),
               ],
             ),
           ),
-          Icon(_getWeatherIcon(_weatherData!['condition']), color: Colors.white, size: 80),
+          Icon(_getWeatherIcon(condition), color: Colors.white, size: 80),
         ],
       ),
     );
@@ -212,9 +219,9 @@ class _WeatherScreenState extends State<WeatherScreen> {
   }
 
   Widget _buildSprayingCard() {
-    String status = _weatherData!['spraying_condition'];
-    bool isSafe = status.contains("Safe");
-    Color color = isSafe ? Colors.green : Colors.orange;
+    String status = _safeVal('spraying_condition', defaultVal: "Safe");
+    bool isSafe = !status.contains("Unsafe"); 
+    Color color = isSafe ? Colors.green : Colors.red;
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -224,15 +231,17 @@ class _WeatherScreenState extends State<WeatherScreen> {
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(color: color.withOpacity(0.1), shape: BoxShape.circle),
-            child: Icon(Icons.science, color: color),
+            child: Icon(isSafe ? Icons.check_circle : Icons.cancel, color: color),
           ),
           const SizedBox(width: 16),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text("Chemical Spraying", style: TextStyle(color: Colors.grey, fontSize: 12)),
-              Text(status, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: color)),
-            ],
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text("Chemical Spraying", style: TextStyle(color: Colors.grey, fontSize: 12)),
+                Text(status, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: color)),
+              ],
+            ),
           ),
         ],
       ),
@@ -240,7 +249,9 @@ class _WeatherScreenState extends State<WeatherScreen> {
   }
 
   Widget _buildRiskCard() {
-    bool isHigh = _weatherData!['risk_level'] == "High";
+    String level = _safeVal('risk_level', defaultVal: "Low");
+    bool isHigh = level == "High";
+    
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -253,23 +264,32 @@ class _WeatherScreenState extends State<WeatherScreen> {
         children: [
           Row(
             children: [
-              Icon(isHigh ? Icons.warning : Icons.check_circle, color: isHigh ? Colors.red : Colors.green),
+              Icon(isHigh ? Icons.warning : Icons.health_and_safety, color: isHigh ? Colors.red : Colors.green),
               const SizedBox(width: 8),
               Text(
-                "${_weatherData!['risk_level']} Disease Risk",
+                "$level Risk",
                 style: TextStyle(fontWeight: FontWeight.bold, color: isHigh ? Colors.red[800] : Colors.green[800], fontSize: 16),
               ),
             ],
           ),
           const SizedBox(height: 8),
-          Text(_weatherData!['advice'], style: const TextStyle(color: Colors.black87, height: 1.4)),
+          Text(
+             _safeVal('advice', defaultVal: "Monitor field conditions."), 
+             style: const TextStyle(color: Colors.black87, height: 1.4)
+          ),
         ],
       ),
     );
   }
 
   Widget _buildForecastList() {
-    List<dynamic> daily = _weatherData!['daily_forecast'];
+    // Safely check if daily_forecast exists
+    List<dynamic> daily = (_weatherData != null && _weatherData!['daily_forecast'] is List) 
+        ? _weatherData!['daily_forecast'] 
+        : [];
+
+    if (daily.isEmpty) return const Text("Forecast unavailable");
+
     return Container(
       decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20)),
       child: ListView.separated(
@@ -279,8 +299,8 @@ class _WeatherScreenState extends State<WeatherScreen> {
         separatorBuilder: (c, i) => Divider(height: 1, color: Colors.grey[100]),
         itemBuilder: (context, index) {
           var day = daily[index];
-          // Simple date parsing if you don't want intl package:
-          String dateStr = day['date'].substring(5); // removes YYYY-
+          String dateStr = day['date'].toString().substring(5);
+          String cond = day['condition'] ?? "Cloudy";
           
           return ListTile(
             contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
@@ -288,9 +308,9 @@ class _WeatherScreenState extends State<WeatherScreen> {
             title: Row(
               children: [
                 const SizedBox(width: 10),
-                Icon(_getWeatherIcon(day['condition']), size: 24, color: Colors.blueGrey),
+                Icon(_getWeatherIcon(cond), size: 24, color: Colors.blueGrey),
                 const SizedBox(width: 10),
-                Text(day['condition'], style: const TextStyle(fontSize: 14)),
+                Text(cond, style: const TextStyle(fontSize: 14)),
               ],
             ),
             trailing: Text("${day['max_temp']}° / ${day['min_temp']}°", style: const TextStyle(fontWeight: FontWeight.bold)),
@@ -301,12 +321,10 @@ class _WeatherScreenState extends State<WeatherScreen> {
   }
 
   IconData _getWeatherIcon(String condition) {
-    switch (condition) {
-      case "Sunny": return Icons.wb_sunny;
-      case "Cloudy": return Icons.cloud;
-      case "Rainy": return Icons.umbrella;
-      case "Storm": return Icons.thunderstorm;
-      default: return Icons.wb_cloudy;
-    }
+    if (condition.contains("Rain")) return Icons.umbrella;
+    if (condition.contains("Storm")) return Icons.thunderstorm;
+    if (condition.contains("Cloud")) return Icons.cloud;
+    if (condition.contains("Sunny") || condition.contains("Clear")) return Icons.wb_sunny;
+    return Icons.wb_cloudy;
   }
 }
