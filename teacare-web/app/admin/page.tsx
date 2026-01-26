@@ -7,8 +7,8 @@ interface SystemHealth {
   api_latency: string;
   services: {
     database: { status: 'online' | 'offline', latency: string };
-    vision_model: { status: 'online' | 'offline', model_name: string };
-    llm_model: { status: 'online' | 'offline', model_name: string };
+    vision_model: { status: 'online' | 'offline', latency: string, model_name: string }; // Added latency
+    llm_model: { status: 'online' | 'offline', latency: string, model_name: string };    // Added latency
     weather_api: { status: 'online' | 'offline', latency: string };
     geo_api: { status: 'online' | 'offline', latency: string };
   };
@@ -46,7 +46,7 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 5000); // Update every 5s
+    const interval = setInterval(fetchData, 10000); 
     return () => clearInterval(interval);
   }, []);
 
@@ -80,14 +80,14 @@ export default function AdminDashboard() {
           <StatusCard 
             title="Vision AI (Leaf)" 
             status={health?.services.vision_model.status || 'offline'} 
-            ping="Ready"
+            ping={health?.services.vision_model.latency || '---'} 
             icon={Activity} 
             details="ConvNeXt Tiny"
           />
           <StatusCard 
             title="Chatbot LLM" 
             status={health?.services.llm_model.status || 'offline'} 
-            ping="Ready"
+            ping={health?.services.llm_model.latency || '---'}    
             icon={Activity} 
             details="Qwen 2.5-0.5B"
           />

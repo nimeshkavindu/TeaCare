@@ -1,0 +1,35 @@
+# --- Web Framework & API ---
+fastapi
+uvicorn
+python-multipart
+pydantic
+pydantic-settings
+python-dotenv
+
+# --- Database ---
+sqlalchemy
+psycopg2-binary
+
+# --- Authentication & Security ---
+passlib[argon2]
+
+# --- AI & Computer Vision ---
+tensorflow
+numpy
+pillow
+opencv-python-headless
+scipy
+
+# --- LLM & Vector DB (RAG) ---
+llama-cpp-python
+chromadb
+fastembed
+
+# --- Utilities ---
+httpx
+fastapi-mail
+pypdf
+reportlab
+python-dateutil
+reverse_geocoder
+pycountry

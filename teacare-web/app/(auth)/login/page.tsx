@@ -29,7 +29,7 @@ export default function LoginPage() {
       // 2. Set Cookies 
       // We set them to expire in 1 day
       Cookies.set('token', 'valid-session', { expires: 1 }); 
-      Cookies.set('role', role, { expires: 1 });
+      Cookies.set('role', userRole, { expires: 1 });
       Cookies.set('user_id', user_id, { expires: 1 });
       Cookies.set('user_name', name, { expires: 1 });
 

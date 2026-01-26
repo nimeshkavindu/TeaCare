@@ -21,9 +21,10 @@ export function middleware(request: NextRequest) {
     }
   }
 
-  // 4. Scenario: User tries to access Researcher Dashboard
+  // 4. Scenario: User tries to access Dashboard (Researchers AND Experts)
   if (pathname.startsWith('/dashboard')) {
-    if (!token || role !== 'researcher') {
+    // FIX: Check for BOTH roles here
+    if (!token || (role !== 'researcher' && role !== 'expert')) {
       return NextResponse.redirect(new URL('/login', request.url))
     }
   }
@@ -31,10 +32,11 @@ export function middleware(request: NextRequest) {
   // 5. If specific authentication pages (login/register) are accessed while logged in
   if (pathname.startsWith('/login') || pathname.startsWith('/register')) {
      if (token && role === 'admin') {
-        return NextResponse.redirect(new URL('/admin', request.url))
+       return NextResponse.redirect(new URL('/admin', request.url))
      }
-     if (token && role === 'researcher') {
-        return NextResponse.redirect(new URL('/dashboard', request.url))
+     // FIX: Auto-redirect Experts to dashboard too
+     if (token && (role === 'researcher' || role === 'expert')) {
+       return NextResponse.redirect(new URL('/dashboard', request.url))
      }
   }
 
