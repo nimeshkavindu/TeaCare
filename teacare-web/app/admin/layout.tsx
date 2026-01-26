@@ -13,10 +13,11 @@ import {
   ScrollText,
   Bot,
   ClipboardList,
-  Book
+  Book,
+  Megaphone
 } from 'lucide-react';
 
-// Update the menu items array
+
 const adminLinks = [
   { href: '/admin', label: 'System Health', icon: LayoutDashboard },
   { href: '/admin/analytics', label: 'Analytics', icon: BarChart3 },
@@ -27,6 +28,7 @@ const adminLinks = [
   { href: '/admin/rag', label: 'Chatbot Training', icon: Bot },
   { href: '/admin/reports', label: 'Disease Reports', icon: ClipboardList },
   { href: '/admin/library', label: 'Pathogen Library Review', icon: Book },
+  { href: '/admin/announcements', label: 'Announcements', icon: Megaphone },
 ];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {

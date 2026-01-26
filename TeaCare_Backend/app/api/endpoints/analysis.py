@@ -164,6 +164,7 @@ async def predict_disease(
 
         # Auto-Verify Logic
         initial_status = "Auto-Verified" if confidence > 85.0 and disease_name != "Unknown / Unclear" else "Pending"
+        initial_correctness = "Yes" if initial_status == "Auto-Verified" else "Unknown"
 
         # Save Report
         new_report = DiseaseReport(
@@ -172,7 +173,8 @@ async def predict_disease(
             confidence=f"{confidence:.1f}%",
             image_url=file_location,
             timestamp=datetime.now().strftime("%Y-%m-%d %H:%M"),
-            verification_status=initial_status
+            verification_status=initial_status,
+            is_correct=initial_correctness
         )
         db.add(new_report)
         db.commit()
@@ -258,14 +260,18 @@ async def predict_advanced(
                 "avg_spot_area_px": 0
             }
 
+        initial_status = "Auto-Verified" if top_result['probability'] > 85.0 else "Pending"
+        initial_correctness = "Yes" if initial_status == "Auto-Verified" else "Unknown"
+
         # 4. Save Report
         new_report = DiseaseReport(
             user_id=user_id,
-            disease_name=top_result["disease"], # Saves the cleaned name
+            disease_name=top_result["disease"],
             confidence=f"{top_result['probability']:.1f}%",
             image_url=file_location,
             timestamp=datetime.now().strftime("%Y-%m-%d %H:%M"),
-            verification_status="Pending"
+            verification_status=initial_status, 
+            is_correct=initial_correctness
         )
         db.add(new_report)
         db.commit()
