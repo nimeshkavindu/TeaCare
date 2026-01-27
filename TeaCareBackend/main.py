@@ -60,9 +60,9 @@ Base = declarative_base()
 
 # --- EMAIL CONFIGURATION ---
 email_conf = ConnectionConfig(
-    MAIL_USERNAME="nimesh.devtest@gmail.com",    # REPLACE THIS
-    MAIL_PASSWORD="ccpd oxyn zpbb wubh",     # REPLACE WITH APP PASSWORD
-    MAIL_FROM="nimesh.devtest@gmail.com",        # REPLACE THIS
+    MAIL_USERNAME="",    # REPLACE THIS
+    MAIL_PASSWORD="",     # REPLACE WITH APP PASSWORD
+    MAIL_FROM="",        # REPLACE THIS
     MAIL_PORT=587,
     MAIL_SERVER="smtp.gmail.com",
     MAIL_STARTTLS=True,
@@ -90,8 +90,8 @@ async def send_otp_email(email: str, otp: str):
 # main.py
 
 # --- CONFIGURATION ---
-TEXTLK_API_TOKEN = "3095|uo6qH3huM0OMixTL7Fn9kZ9FMCPY90er0JvWeDIh5e3400f2"  # <--- PASTE TOKEN HERE
-TEXTLK_SENDER_ID = "TextLKDemo"                   # <--- CHANGE IF YOU HAVE A CUSTOM ID
+TEXTLK_API_TOKEN = ""  # <--- PASTE TOKEN HERE
+TEXTLK_SENDER_ID = ""                   # <--- CHANGE IF YOU HAVE A CUSTOM ID
 
 # --- HELPER: Send OTP via SMS (Text.lk) ---
 async def send_otp_sms(phone: str, otp: str):
