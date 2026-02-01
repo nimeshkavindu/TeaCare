@@ -35,8 +35,6 @@ The tea industry suffers from significant yield losses due to diseases, exacerba
 * 
 ![Weather Screenshot](assets/weather_demo.png)
 
-
-
 ![analytical_dashboard](assets/analytical_dashboard.PNG)
 
 ![Advanced leaf scan](assets/advanced_scan.PNG)
@@ -68,7 +66,11 @@ The system achieved an **Overall Accuracy of 88%** across all test classes[cite:
 | **Healthy Leaf Recall** | **0.99** | Near-perfect reliability in identifying healthy plants, preventing unnecessary chemical usage [cite: 43-44]. |
 | **Inference Time** | **< 2s** | Real-time performance suitable for field use[cite: 52]. |
 
-![Confusion Matrix](assets/confusion_matrix.png)
+![Precision and recall](assets/precision_and_recall.PNG)
+
+![Confusion matrix](assets/confusion_matrix.png)
+
+![Accuracy and Loss](assets/accuracy_and_loss.png)
 ---
 
 ## 🚀 Getting Started
