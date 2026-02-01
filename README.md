@@ -1,6 +1,5 @@
 # TeaCare: AI-Powered Tea Plant Disease Identification System 🌱📱
 
-![TeaCare Banner](assets/banner.png)
 [![Flutter](https://img.shields.io/badge/Flutter-3.0%2B-blue?logo=flutter)](https://flutter.dev/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.95%2B-009688?logo=fastapi)](https://fastapi.tiangolo.com/)
 [![Python](https://img.shields.io/badge/Python-3.9%2B-yellow?logo=python)](https://www.python.org/)
