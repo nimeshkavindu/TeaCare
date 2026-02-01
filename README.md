@@ -32,7 +32,16 @@ The tea industry suffers from significant yield losses due to diseases, exacerba
 ![Heatmap Screenshot](assets/heatmap_demo.png)
 ### 4. 🌦️ Weather-Based Risk Alerts
 * **Function:** A logic-based engine that correlates real-time weather data (humidity, temperature) to forecast fungal disease risks before they spread[cite: 32].
+* 
+![Weather Screenshot](assets/weather_demo.png)
 
+
+
+![analytical_dashboard](assets/analytical_dashboard.png)
+
+![Advanced leaf scan](assets/advanced_scan.png)
+
+![Admin Dashboard](assets/admin_dashboard.png)
 ---
 
 ## 🏗️ System Architecture
