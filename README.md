@@ -37,11 +37,11 @@ The tea industry suffers from significant yield losses due to diseases, exacerba
 
 
 
-![analytical_dashboard](assets/analytical_dashboard.png)
+![analytical_dashboard](assets/analytical_dashboard.PNG)
 
-![Advanced leaf scan](assets/advanced_scan.png)
+![Advanced leaf scan](assets/advanced_scan.PNG)
 
-![Admin Dashboard](assets/admin_dashboard.png)
+![Admin Dashboard](assets/admin_dashboard.PNG)
 ---
 
 ## 🏗️ System Architecture
