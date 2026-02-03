@@ -7,31 +7,31 @@
 
 ## 📖 Overview
 
-**TeaCare** is a "Digital Doctor" mobile application designed to assist tea farmers in Sri Lanka by identifying plant diseases instantly and providing expert management advice[cite: 28]. 
+**TeaCare** is a "Digital Doctor" mobile application designed to assist tea farmers in Sri Lanka by identifying plant diseases instantly and providing expert management advice. 
 
-The tea industry suffers from significant yield losses due to diseases, exacerbated by a scarcity of agronomists and delayed manual diagnosis [cite: 13-16]. [cite_start]TeaCare bridges this gap by deploying lightweight, low-latency AI models directly on standard mobile hardware, connecting smallholder farmers with expert-level agronomy knowledge[cite: 62].
+The tea industry suffers from significant yield losses due to diseases, exacerbated by a scarcity of agronomists and delayed manual diagnosis. TeaCare bridges this gap by deploying lightweight, low-latency AI models directly on standard mobile hardware, connecting smallholder farmers with expert-level agronomy knowledge.
 
 ---
 
 ## ✨ Key Features
 
 ### 1. 🍃 Instant Disease Diagnosis (The "Digital Doctor")
-* **Function:** Identifies 7 distinct classes of tea leaf conditions in under 2 seconds[cite: 29, 52].
-* **Classes Detected:** Tea Algal Leaf Spot, Brown Blight, Gray Blight, Helopeltis, Red Spider, Green Mirid Bug, and Healthy Leaf[cite: 45].
-* **Tech:** Powered by a transfer-learning optimized **ConvNeXtTiny** model[cite: 38].
+* **Function:** Identifies 7 distinct classes of tea leaf conditions in under 2 seconds.
+* **Classes Detected:** Tea Algal Leaf Spot, Brown Blight, Gray Blight, Helopeltis, Red Spider, Green Mirid Bug, and Healthy Leaf.
+* **Tech:** Powered by a transfer-learning optimized **ConvNeXtTiny** model.
 
 ![Disease Diagnosis Screenshot](assets/scanner_demo.png)
 ### 2. 🤖 AI Expert Chatbot
-* **Function:** Farmers can ask "How do I fix this?" and receive safe, verified answers sourced from official technical manuals[cite: 30].
-* **Tech:** Runs on a quantized **Qwen-0.5B** Small Language Model (SLM) optimized for CPU inference[cite: 39].
+* **Function:** Farmers can ask "How do I fix this?" and receive safe, verified answers sourced from official technical manuals.
+* **Tech:** Runs on a quantized **Qwen-0.5B** Small Language Model (SLM) optimized for CPU inference.
 
 ![Chatbot Screenshot](assets/chatbot_demo.png)
 ### 3. 🗺️ Live Disease Geo-Heatmap
-* **Function:** A real-time geospatial map that tracks disease outbreaks across regions to help researchers and authorities monitor spread patterns[cite: 31].
+* **Function:** A real-time geospatial map that tracks disease outbreaks across regions to help researchers and authorities monitor spread patterns.
 
 ![Heatmap Screenshot](assets/heatmap_demo.png)
 ### 4. 🌦️ Weather-Based Risk Alerts
-* **Function:** A logic-based engine that correlates real-time weather data (humidity, temperature) to forecast fungal disease risks before they spread[cite: 32].
+* **Function:** A logic-based engine that correlates real-time weather data (humidity, temperature) to forecast fungal disease risks before they spread.
 * 
 ![Weather Screenshot](assets/weather_demo.png)
 
@@ -47,24 +47,24 @@ The tea industry suffers from significant yield losses due to diseases, exacerba
 TeaCare is architected for performance on low-end devices, ensuring accessibility for all farmers.
 
 ### Tech Stack
-* **Frontend (Mobile):** [Flutter (Dart)](https://flutter.dev/) - Selected for cross-platform consistency and native performance[cite: 34].
-* **Backend:** [FastAPI (Python)](https://fastapi.tiangolo.com/) - Handles asynchronous inference requests and database orchestration[cite: 36].
+* **Frontend (Mobile):** [Flutter (Dart)](https://flutter.dev/) - Selected for cross-platform consistency and native performance.
+* **Backend:** [FastAPI (Python)](https://fastapi.tiangolo.com/) - Handles asynchronous inference requests and database orchestration.
 * **AI Engine:**
-    * **Visual:** ConvNeXtTiny (Transfer Learning)[cite: 38].
-    * **NLP:** Qwen-0.5B (Quantized)[cite: 39].
+    * **Visual:** ConvNeXtTiny (Transfer Learning).
+    * **NLP:** Qwen-0.5B (Quantized).
 * **Web Dashboard:** Next.js (for administrative analytics).
 
 ---
 
 ## 📊 Performance & Results
 
-The system achieved an **Overall Accuracy of 88%** across all test classes[cite: 41].
+The system achieved an **Overall Accuracy of 88%** across all test classes.
 
 | Metric | Value | Significance |
 | :--- | :--- | :--- |
-| **Overall Accuracy** | **88%** | ]Reliable identification across 7 classes[cite: 41]. |
-| **Healthy Leaf Recall** | **0.99** | Near-perfect reliability in identifying healthy plants, preventing unnecessary chemical usage [cite: 43-44]. |
-| **Inference Time** | **< 2s** | Real-time performance suitable for field use[cite: 52]. |
+| **Overall Accuracy** | **88%** | ]Reliable identification across 7 classes. |
+| **Healthy Leaf Recall** | **0.99** | Near-perfect reliability in identifying healthy plants, preventing unnecessary chemical usage. |
+| **Inference Time** | **< 2s** | Real-time performance suitable for field use. |
 
 ![Precision and recall](assets/precision_and_recall.PNG)
 
